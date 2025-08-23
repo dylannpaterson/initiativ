@@ -3,6 +3,13 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
+
+struct Ability {
+  std::string name;
+  std::string description;
+  std::string type;
+};
 
 struct Monster {
   std::string name;
@@ -11,6 +18,7 @@ struct Monster {
   std::string alignment;
   int armorClass;
   int hitPoints;
+  std::string hitDice;
   std::string speed;
   int strength;
   int dexterity;
@@ -19,8 +27,16 @@ struct Monster {
   int wisdom;
   int charisma;
   std::string challengeRating;
-  // We will add more fields like skills, senses, actions, etc. later.
-  // For now, this is a solid foundation.
+
+  // New fields for skills, senses, saving throws, and immunities
+  std::vector<std::string> skills;
+  std::vector<std::string> senses;
+  std::vector<std::string> savingThrows;
+  std::vector<std::string> conditionImmunities;
+  std::vector<std::string> damageImmunities;
+  std::vector<std::string> damageResistances;
+  std::vector<std::string> damageVulnerabilities;
+  std::vector<Ability> abilities;
 
   // A simple function to display the monster's core stats
   void display() const {
@@ -29,7 +45,8 @@ struct Monster {
     std::cout << "Type: " << type << std::endl;
     std::cout << "Alignment: " << alignment << std::endl;
     std::cout << "Armor Class: " << armorClass << std::endl;
-    std::cout << "Hit Points: " << hitPoints << std::endl;
+    std::cout << "Hit Points: " << hitPoints << " (" << hitDice << ")"
+              << std::endl;
     std::cout << "Speed: " << speed << std::endl;
     std::cout << "STR: " << strength << " | DEX: " << dexterity
               << " | CON: " << constitution << " | INT: " << intelligence

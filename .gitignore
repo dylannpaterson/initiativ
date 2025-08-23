@@ -41,3 +41,6 @@
 *.dwo
 
 /build
+/data/fonts
+.cache
+.vscode

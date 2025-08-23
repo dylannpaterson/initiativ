@@ -83,11 +83,11 @@ def setup_database():
     cursor.execute(
         """
     CREATE TABLE IF NOT EXISTS Monsters (
-        MonsterID INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE, ArmorClass INTEGER, 
-        HitPoints_Avg INTEGER, HitPoints_Formula TEXT, HitPoints_NumDice INTEGER, 
+        MonsterID INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE, Size TEXT, Type TEXT, Alignment TEXT, 
+        ArmorClass INTEGER, HitPoints_Avg INTEGER, HitPoints_Formula TEXT, HitPoints_NumDice INTEGER, 
         HitPoints_DieType INTEGER, HitPoints_Modifier INTEGER, Speed TEXT, Strength INTEGER, 
         Dexterity INTEGER, Constitution INTEGER, Intelligence INTEGER, Wisdom INTEGER, 
-        Charisma INTEGER, Languages TEXT
+        Charisma INTEGER, Languages TEXT, ChallengeRating REAL
     )"""
     )
     cursor.execute(
@@ -274,18 +274,27 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
     # Languages are a simple text field for now
     languages = data.get("languages", "")
 
+    # Retrieve the new fields
+    size = data.get("size")
+    type_val = data.get("type")
+    alignment = data.get("alignment")
+    cr = data.get("challenge_rating")
+
     # --- 2. Insert Core Data into Monsters Table ---
     cursor.execute(
         """
         INSERT INTO Monsters (
-            Name, ArmorClass, HitPoints_Avg, HitPoints_Formula, HitPoints_NumDice, 
+            Name, Size, Type, Alignment, ArmorClass, HitPoints_Avg, HitPoints_Formula, HitPoints_NumDice, 
             HitPoints_DieType, HitPoints_Modifier, Speed,
             Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma,
-            Languages
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            Languages, ChallengeRating
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             monster_name,
+            size,
+            type_val,
+            alignment,
             ac,
             hp_avg,
             hp_formula_str,
@@ -300,6 +309,7 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
             wisdom,
             charisma,
             languages,
+            cr,
         ),
     )
     monster_id = cursor.lastrowid
