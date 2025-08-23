@@ -40,6 +40,7 @@ def setup_database():
     cursor.execute("DROP TABLE IF EXISTS Monster_DamageVulnerabilities")
     cursor.execute("DROP TABLE IF EXISTS Monster_ConditionImmunities")
     cursor.execute("DROP TABLE IF EXISTS Monster_SpellSlots")
+    cursor.execute("DROP TABLE IF EXISTS Ability_Usage")
     # Lookup Tables
     cursor.execute("DROP TABLE IF EXISTS Spells")
     cursor.execute("DROP TABLE IF EXISTS Skills")
@@ -69,12 +70,22 @@ def setup_database():
         "CREATE TABLE IF NOT EXISTS SavingThrows (SavingThrowID INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE COLLATE NOCASE)"
     )
 
+    # --- Manually add the known senses since there is no API endpoint for them ---
+    cursor.execute("INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("blindsight",))
+    cursor.execute("INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("darkvision",))
+    cursor.execute(
+        "INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("passive perception",)
+    )
+    cursor.execute("INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("tremorsense",))
+    cursor.execute("INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("truesight",))
+
     # --- CORE TABLES ---
     cursor.execute(
         """
     CREATE TABLE IF NOT EXISTS Monsters (
         MonsterID INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE, ArmorClass INTEGER, 
-        HitPoints_Avg INTEGER, HitPoints_Formula TEXT, Speed TEXT, Strength INTEGER, 
+        HitPoints_Avg INTEGER, HitPoints_Formula TEXT, HitPoints_NumDice INTEGER, 
+        HitPoints_DieType INTEGER, HitPoints_Modifier INTEGER, Speed TEXT, Strength INTEGER, 
         Dexterity INTEGER, Constitution INTEGER, Intelligence INTEGER, Wisdom INTEGER, 
         Charisma INTEGER, Languages TEXT
     )"""
@@ -86,14 +97,25 @@ def setup_database():
         Description TEXT, AbilityType TEXT, FOREIGN KEY (MonsterID) REFERENCES Monsters(MonsterID)
     )"""
     )
+    cursor.execute(
+        """
+    CREATE TABLE IF NOT EXISTS Ability_Usage (
+        AbilityUsageID INTEGER PRIMARY KEY,
+        AbilityID INTEGER,
+        UsageType TEXT NOT NULL,
+        RechargeValue INTEGER,
+        UsesMax INTEGER,
+        FOREIGN KEY (AbilityID) REFERENCES Abilities(AbilityID)
+    )"""
+    )
 
     # --- JOIN TABLES ---
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS Monster_Skills (MonsterID INTEGER, SkillID INTEGER, Value INTEGER NOT NULL, PRIMARY KEY (MonsterID, SkillID))"
     )
     cursor.execute(
-        "CREATE TABLE IF NOT EXISTS Monster_SavingThrows (MonsterID INTEGER, SavingThrowID INTEGER, Value INTEGER NOT NULL, PRIMARY KEY (MonsterID, SavingThrowID))"
-    )  # The new join table
+        "CREATE TABLE IF NOT EXISTS Monster_SavingThrows (MonsterID INTEGER, SavingThrowID INTEGER, Value INTEGER NOT NULL, PRIMARY KEY (MonsterID, SavingThrowID))"  # The new join table
+    )
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS Monster_Senses (MonsterID INTEGER, SenseID INTEGER, Value TEXT NOT NULL, PRIMARY KEY (MonsterID, SenseID))"
     )
@@ -226,8 +248,19 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
 
     # --- 1. Parse Core Information & Attributes ---
     ac = data.get("armor_class", [{}])[0].get("value", 10)
-    hp_avg = data.get("hit_points")
-    hp_formula = data.get("hit_points_dice")
+    hp_avg = data.get("hit_points", 0)
+    hp_formula_str = data.get("hit_dice", "")
+
+    # We get the monster's Constitution FIRST, as it is the source of the modifier.
+    constitution = data.get("constitution", 10)
+
+    # My function will correctly parse the dice. We no longer care about a modifier from the string.
+    num_dice, die_type, _ = parse_hp_formula(hp_formula_str)
+
+    # THE TRUE STRATEGY: Calculate the modifier from the monster's core vitality.
+    # This is the value you have been seeking.
+    con_modifier = (constitution - 10) // 2
+    total_hp_modifier = con_modifier * num_dice
     speed = json.dumps(data.get("speed", {}))
 
     # Parse the six core attributes
@@ -245,16 +278,20 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
     cursor.execute(
         """
         INSERT INTO Monsters (
-            Name, ArmorClass, HitPoints_Avg, HitPoints_Formula, Speed,
+            Name, ArmorClass, HitPoints_Avg, HitPoints_Formula, HitPoints_NumDice, 
+            HitPoints_DieType, HitPoints_Modifier, Speed,
             Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma,
             Languages
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             monster_name,
             ac,
             hp_avg,
-            hp_formula,
+            hp_formula_str,
+            num_dice,
+            die_type,
+            total_hp_modifier,  # <-- Here, we insert the CORRECTLY CALCULATED value.
             speed,
             strength,
             dexterity,
@@ -291,36 +328,70 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
             if st_name in saving_throws_map:
                 st_id = saving_throws_map[st_name]
 
-                # --- NEW DIAGNOSTIC PRINT STATEMENT ---
-                print(
-                    f"  -> DEBUG: Attempting to INSERT into Monster_SavingThrows with MonsterID={monster_id}, SavingThrowID={st_id} ({st_name}), Value={prof_value}"
-                )
-
                 cursor.execute(
-                    "INSERT INTO Monster_SavingThrows (MonsterID, SavingThrowID, Value) VALUES (?, ?, ?)",
+                    "INSERT OR IGNORE INTO Monster_SavingThrows (MonsterID, SavingThrowID, Value) VALUES (?, ?, ?)",
                     (monster_id, st_id, prof_value),
                 )
 
     damage_types_map = lookup_data.get("damagetypes", {})
 
     process_damage_list(
+        cursor,
         monster_id,
         data.get("damage_vulnerabilities", []),
         "Monster_DamageVulnerabilities",
         damage_types_map,
     )
     process_damage_list(
+        cursor,
         monster_id,
         data.get("damage_resistances", []),
         "Monster_DamageResistances",
         damage_types_map,
     )
     process_damage_list(
+        cursor,
         monster_id,
         data.get("damage_immunities", []),
         "Monster_DamageImmunities",
         damage_types_map,
     )
+
+    # --- Parse and Store Senses ---
+    senses_data = data.get("senses", {})
+    senses_map = lookup_data.get("senses", {})
+
+    if senses_data:
+        print("  -> Analyzing senses...")
+        for sense_name_raw, sense_value in senses_data.items():
+            # Normalize the sense name from the monster data (e.g., "passive_perception")
+            # to match the lookup table (e.g., "passive perception")
+            sense_name = sense_name_raw.replace("_", " ").lower()
+
+            if sense_name in senses_map:
+                sense_id = senses_map[sense_name]
+                # The value can be an integer or a string, so convert to string to be safe
+                value_str = str(sense_value)
+
+                cursor.execute(
+                    "INSERT OR IGNORE INTO Monster_Senses (MonsterID, SenseID, Value) VALUES (?, ?, ?)",
+                    (monster_id, sense_id, value_str),
+                )
+
+    # --- Parse and Store Condition Immunities ---
+    condition_immunities = data.get("condition_immunities", [])
+    conditions_map = lookup_data.get("conditions", {})
+
+    if condition_immunities:
+        print("  -> Analyzing condition immunities...")
+        for cond in condition_immunities:
+            cond_name = cond.get("name", "").lower()
+            if cond_name in conditions_map:
+                cond_id = conditions_map[cond_name]
+                cursor.execute(
+                    "INSERT OR IGNORE INTO Monster_ConditionImmunities (MonsterID, ConditionID) VALUES (?, ?)",
+                    (monster_id, cond_id),
+                )
 
     ability_sections = {
         "Trait": data.get("special_abilities", []),
@@ -333,44 +404,72 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
             ability_name = ability_data.get("name")
             ability_desc = ability_data.get("desc")
 
-            usage_match_recharge = re.search(r"\(Recharge (\d+)-(\d+)\)", ability_name)
-            usage_match_per_day = re.search(r"\((\d+)/Day\)", ability_name)
-
             cursor.execute(
                 "INSERT INTO Abilities (MonsterID, Name, Description, AbilityType) VALUES (?, ?, ?, ?)",
                 (monster_id, ability_name, ability_desc, ability_type),
             )
             ability_id = cursor.lastrowid
 
-            if usage_match_recharge:
-                recharge_value = int(usage_match_recharge.group(1))
-                cursor.execute(
-                    "INSERT INTO Ability_Usage (AbilityID, UsageType, RechargeValue) VALUES (?, ?, ?)",
-                    (ability_id, "Recharge", recharge_value),
-                )
-
-            if usage_match_per_day:
-                uses_max = int(usage_match_per_day.group(1))
-                cursor.execute(
-                    "INSERT INTO Ability_Usage (AbilityID, UsageType, UsesMax) VALUES (?, ?, ?)",
-                    (ability_id, "Per Day", uses_max),
-                )
+            # --- Parse Ability Usage ---
+            usage_data = ability_data.get("usage")
+            if usage_data:
+                usage_type = usage_data.get("type")
+                if usage_type == "per day":
+                    uses_max = usage_data.get("times")
+                    if uses_max:
+                        print(f"  -> Found usage: {uses_max}/Day")
+                        cursor.execute(
+                            "INSERT INTO Ability_Usage (AbilityID, UsageType, UsesMax) VALUES (?, ?, ?)",
+                            (ability_id, "Per Day", uses_max),
+                        )
+                elif usage_type in ["recharge on roll", "recharge after rest"]:
+                    recharge_value = usage_data.get("min_value")
+                    if recharge_value:
+                        print(f"  -> Found usage: Recharge {recharge_value}+")
+                        cursor.execute(
+                            "INSERT INTO Ability_Usage (AbilityID, UsageType, RechargeValue) VALUES (?, ?, ?)",
+                            (ability_id, "Recharge", recharge_value),
+                        )
 
             if ability_name == "Spellcasting":
                 spells_found = 0
                 lines = ability_desc.split("\n")
+
+                # Regex to find spell slots, e.g., "1st level (4 slots): ..."
+                slot_pattern = re.compile(r"(\d+)(?:st|nd|rd|th) level \((\d+) slots\)")
+
                 for line in lines:
+                    # First, check for spell slots on this line
+                    slot_match = slot_pattern.search(line)
+                    if slot_match:
+                        spell_level = int(slot_match.group(1))
+                        num_slots = int(slot_match.group(2))
+                        print(
+                            f"  -> Found {num_slots} slots for level {spell_level} spells."
+                        )
+                        cursor.execute(
+                            "INSERT OR IGNORE INTO Monster_SpellSlots (MonsterID, SpellLevel, Slots) VALUES (?, ?, ?)",
+                            (monster_id, spell_level, num_slots),
+                        )
+
+                    # Then, parse the spell names from the line
                     if ":" in line:
                         parts = line.split(":", 1)
                         if len(parts) == 2:
                             spell_list_str = parts[1]
                             spell_names = [
-                                spell.strip().replace(".", "")
+                                spell.strip()
+                                .replace(".", "")
+                                .replace("*", "")  # Also remove asterisks
                                 for spell in spell_list_str.split(",")
                             ]
                             for spell_name in spell_names:
                                 if not spell_name:
                                     continue
+
+                                # Clean up spell name further if needed, e.g. "(self only)"
+                                spell_name = re.sub(r"\(.*?\)", "", spell_name).strip()
+
                                 spells_found += 1
                                 spell_name_lower = spell_name.lower()
                                 cursor.execute(
@@ -381,11 +480,58 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
                                 if spell_id_result:
                                     spell_id = spell_id_result[0]
                                     cursor.execute(
-                                        "INSERT INTO Monster_Spells (MonsterID, SpellID) VALUES (?, ?)",
+                                        "INSERT OR IGNORE INTO Monster_Spells (MonsterID, SpellID) VALUES (?, ?)",
                                         (monster_id, spell_id),
                                     )
+                                else:
+                                    print(
+                                        f"  -> WARNING: Could not find spell '{spell_name}' in the grimoire."
+                                    )
+
                 if spells_found > 0:
                     print(f"  -> Successfully linked {spells_found} spells.")
+
+
+def parse_hp_formula(formula):
+    """
+    Dissects the hit point formula string into its component parts.
+    This final, robust version uses a simpler pattern and cleans the input.
+
+    Args:
+        formula (str): The string representing the hit point formula (e.g., ' 2d8 + 4 ').
+
+    Returns:
+        tuple: A tuple containing (num_dice, die_type, modifier).
+               Returns (0, 0, 0) if the formula cannot be parsed.
+    """
+    # First, a commander must ensure their intelligence is clean.
+    if not formula:
+        return 0, 0, 0
+    cleaned_formula = formula.strip()
+
+    # A simpler, more direct pattern. It captures the entire modifier string.
+    pattern = re.compile(r"(\d+)d(\d+)\s*([+-]\s*\d+)?")
+    match = pattern.match(cleaned_formula)
+
+    if match:
+        num_dice = int(match.group(1))
+        die_type = int(match.group(2))
+
+        modifier = 0
+        modifier_str = match.group(3)  # This will be like '+ 36', '- 3', or None
+
+        if modifier_str:
+            # Remove spaces from the modifier string and convert to an integer
+            modifier = int(modifier_str.replace(" ", ""))
+
+        return num_dice, die_type, modifier
+
+    # Fallback for formulas that are just a number (e.g., "7")
+    try:
+        only_number = int(cleaned_formula)
+        return (0, 0, only_number)
+    except (ValueError, TypeError):
+        return (0, 0, 0)
 
 
 def populate_lookup_table(conn, table_name, api_endpoint, key_name="name"):
@@ -408,48 +554,86 @@ def populate_lookup_table(conn, table_name, api_endpoint, key_name="name"):
 
 
 # A helper function to parse these complex strings
-def process_damage_list(monster_id, damage_list, table_name, damage_types_map):
+def process_damage_list(cursor, monster_id, damage_list, table_name, damage_types_map):
     if not damage_list:
         return
 
     print(f"  -> Analyzing {table_name.replace('_', ' ').lower()}...")
+
     for item_str in damage_list:
-        note = ""
-        found_type = None
+        # Each item in damage_list can contain multiple rules separated by semicolons
+        rules = [rule.strip() for rule in item_str.lower().split(";")]
 
-        # Find the core damage type within the string
-        for dmg_type, dmg_id in damage_types_map.items():
-            if dmg_type in item_str.lower():
-                found_type = dmg_type
-                # Any remaining text is a note
-                note_parts = item_str.lower().split(dmg_type)
-                note = "".join(note_parts).strip()
-                break  # Stop after finding the first match
+        for rule in rules:
+            if not rule:
+                continue
 
-        if found_type:
-            type_id = damage_types_map[found_type]
+            note = ""
+            damage_section = rule
 
-            # Resistances table has a 'Note' column, others do not
-            if "Resistances" in table_name and note:
-                cursor.execute(
-                    f"INSERT INTO {table_name} (MonsterID, DamageTypeID, Note) VALUES (?, ?, ?)",
-                    (monster_id, type_id, note),
-                )
+            # Find keywords that separate damage types from a condition/note
+            match = re.search(
+                r"^(.*?)(?:\s+\bfrom\b|\s+\bexcept\b|\s+that\b)(.*)$", rule
+            )
+            if match:
+                damage_section = match.group(1).strip()
+                note = rule.replace(damage_section, "").strip()
+
+            # Find all the damage types mentioned in the damage section of the rule
+            found_types = []
+            # We split by ',' or 'and' to find individual damage type names
+            potential_types = re.split(r",|\s+and\s+", damage_section)
+            for p_type in potential_types:
+                # Clean up the potential type name
+                p_type = p_type.strip()
+                if p_type in damage_types_map:
+                    found_types.append(p_type)
+
+            # If we found specific types, add them to the database with the note
+            if found_types:
+                for damage_type_name in found_types:
+                    damage_type_id = damage_types_map[damage_type_name]
+
+                    # For Resistances, we store the note. For others, we don't.
+                    if "Resistances" in table_name:
+                        cursor.execute(
+                            f"INSERT OR IGNORE INTO {table_name} (MonsterID, DamageTypeID, Note) VALUES (?, ?, ?)",
+                            (monster_id, damage_type_id, note),
+                        )
+                    else:
+                        cursor.execute(
+                            f"INSERT OR IGNORE INTO {table_name} (MonsterID, DamageTypeID) VALUES (?, ?)",
+                            (monster_id, damage_type_id),
+                        )
+            # If we didn't find specific types, the whole rule might be a note.
+            # This happens with things like "bludgeoning, piercing, and slashing from nonmagical attacks"
+            # where the damage types are not perfectly separated.
+            # Let's add a fallback for this common case.
             else:
-                cursor.execute(
-                    f"INSERT INTO {table_name} (MonsterID, DamageTypeID) VALUES (?, ?)",
-                    (monster_id, type_id),
-                )
-        else:
-            # If no known damage type, store the whole string as a note for bludgeoning (as a fallback)
-            # This handles "bludgeoning, piercing, and slashing from nonmagical attacks"
-            if "bludgeoning" in item_str.lower():
-                bludgeoning_id = damage_types_map.get("bludgeoning")
-                if bludgeoning_id:
-                    cursor.execute(
-                        f"INSERT INTO {table_name} (MonsterID, DamageTypeID, Note) VALUES (?, ?, ?)",
-                        (monster_id, bludgeoning_id, item_str),
-                    )
+                # Check for the big three physical types in the original rule string
+                physical_types_present = []
+                if "bludgeoning" in rule:
+                    physical_types_present.append("bludgeoning")
+                if "piercing" in rule:
+                    physical_types_present.append("piercing")
+                if "slashing" in rule:
+                    physical_types_present.append("slashing")
+
+                if physical_types_present:
+                    # The note is the full rule string
+                    full_note = rule
+                    for damage_type_name in physical_types_present:
+                        damage_type_id = damage_types_map[damage_type_name]
+                        if "Resistances" in table_name:
+                            cursor.execute(
+                                f"INSERT OR IGNORE INTO {table_name} (MonsterID, DamageTypeID, Note) VALUES (?, ?, ?)",
+                                (monster_id, damage_type_id, full_note),
+                            )
+                        else:
+                            cursor.execute(
+                                f"INSERT OR IGNORE INTO {table_name} (MonsterID, DamageTypeID) VALUES (?, ?)",
+                                (monster_id, damage_type_id),
+                            )
 
 
 if __name__ == "__main__":
@@ -471,6 +655,7 @@ if __name__ == "__main__":
         "SavingThrows": "SavingThrowID",
         "DamageTypes": "DamageTypeID",
         "Conditions": "ConditionID",
+        "Senses": "SenseID",
     }
     for table, id_col in lookup_map.items():
         cursor.execute(f"SELECT Name, {id_col} FROM {table}")
