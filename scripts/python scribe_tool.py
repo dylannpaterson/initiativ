@@ -50,6 +50,8 @@ def setup_database():
     # Core Tables
     cursor.execute("DROP TABLE IF EXISTS Abilities")
     cursor.execute("DROP TABLE IF EXISTS Monsters")
+    # New speed table
+    cursor.execute("DROP TABLE IF EXISTS Monster_Speeds")
 
     print("Forging the new, normalized Archives...")
 
@@ -85,8 +87,8 @@ def setup_database():
     CREATE TABLE IF NOT EXISTS Monsters (
         MonsterID INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE, Size TEXT, Type TEXT, Alignment TEXT, 
         ArmorClass INTEGER, HitPoints_Avg INTEGER, HitPoints_Formula TEXT, HitPoints_NumDice INTEGER, 
-        HitPoints_DieType INTEGER, HitPoints_Modifier INTEGER, Speed TEXT, Strength INTEGER, 
-        Dexterity INTEGER, Constitution INTEGER, Intelligence INTEGER, Wisdom INTEGER, 
+        HitPoints_DieType INTEGER, HitPoints_Modifier INTEGER, 
+        Strength INTEGER, Dexterity INTEGER, Constitution INTEGER, Intelligence INTEGER, Wisdom INTEGER, 
         Charisma INTEGER, Languages TEXT, ChallengeRating REAL
     )"""
     )
@@ -130,6 +132,18 @@ def setup_database():
     )
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS Monster_ConditionImmunities (MonsterID INTEGER, ConditionID INTEGER, PRIMARY KEY (MonsterID, ConditionID))"
+    )
+    # The new, normalized table for speed
+    cursor.execute(
+        """
+    CREATE TABLE IF NOT EXISTS Monster_Speeds (
+        MonsterID INTEGER,
+        SpeedType TEXT NOT NULL,
+        Value TEXT NOT NULL,
+        PRIMARY KEY (MonsterID, SpeedType),
+        FOREIGN KEY (MonsterID) REFERENCES Monsters(MonsterID)
+    )
+    """
     )
 
     # --- SPELL TABLES ---
@@ -261,7 +275,8 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
     # This is the value you have been seeking.
     con_modifier = (constitution - 10) // 2
     total_hp_modifier = con_modifier * num_dice
-    speed = json.dumps(data.get("speed", {}))
+    # Speed is now parsed separately
+    speed_data = data.get("speed", {})
 
     # Parse the six core attributes
     strength = data.get("strength", 10)
@@ -285,10 +300,10 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
         """
         INSERT INTO Monsters (
             Name, Size, Type, Alignment, ArmorClass, HitPoints_Avg, HitPoints_Formula, HitPoints_NumDice, 
-            HitPoints_DieType, HitPoints_Modifier, Speed,
+            HitPoints_DieType, HitPoints_Modifier,
             Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma,
             Languages, ChallengeRating
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             monster_name,
@@ -301,7 +316,6 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
             num_dice,
             die_type,
             total_hp_modifier,  # <-- Here, we insert the CORRECTLY CALCULATED value.
-            speed,
             strength,
             dexterity,
             constitution,
@@ -314,6 +328,15 @@ def parse_and_store_monster(monster_slug, conn, lookup_data):
     )
     monster_id = cursor.lastrowid
     print(f"  -> Stored '{monster_name}' with MonsterID: {monster_id}")
+
+    # --- New: Insert Speed data into the new table ---
+    if speed_data:
+        for speed_type, speed_value in speed_data.items():
+            if speed_value != "—":  # Exclude entries with '—'
+                cursor.execute(
+                    "INSERT OR IGNORE INTO Monster_Speeds (MonsterID, SpeedType, Value) VALUES (?, ?, ?)",
+                    (monster_id, speed_type, speed_value),
+                )
 
     # --- 3. Parse and Store Proficiencies (SKILLS) ---
     proficiencies = data.get("proficiencies", [])

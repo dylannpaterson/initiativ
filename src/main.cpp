@@ -41,6 +41,7 @@ std::vector<std::string> getMonsterDamageResistances(int monsterId,
 std::vector<std::string> getMonsterDamageVulnerabilities(int monsterId,
                                                          SQLite::Database &db);
 std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db);
+std::vector<std::string> getMonsterSpeeds(int monsterId, SQLite::Database &db);
 
 // Function to fetch all monster names from the database
 std::vector<std::string> getMonsterNames(SQLite::Database &db) {
@@ -75,7 +76,7 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
     // Now, fetch all core information
     SQLite::Statement coreQuery(
         db, "SELECT Name, Size, Type, Alignment, ArmorClass, HitPoints_Avg, "
-            "HitPoints_Formula, Speed, Strength, Dexterity, Constitution, "
+            "HitPoints_Formula, Strength, Dexterity, Constitution, "
             "Intelligence, Wisdom, Charisma, ChallengeRating "
             "FROM Monsters WHERE MonsterID = ?");
 
@@ -89,17 +90,17 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
       monster.armorClass = coreQuery.getColumn(4).getInt();
       monster.hitPoints = coreQuery.getColumn(5).getInt();
       monster.hitDice = coreQuery.getColumn(6).getString();
-      monster.speed = coreQuery.getColumn(7).getString();
-      monster.strength = coreQuery.getColumn(8).getInt();
-      monster.dexterity = coreQuery.getColumn(9).getInt();
-      monster.constitution = coreQuery.getColumn(10).getInt();
-      monster.intelligence = coreQuery.getColumn(11).getInt();
-      monster.wisdom = coreQuery.getColumn(12).getInt();
-      monster.charisma = coreQuery.getColumn(13).getInt();
-      monster.challengeRating = coreQuery.getColumn(14).getString();
+      monster.strength = coreQuery.getColumn(7).getInt();
+      monster.dexterity = coreQuery.getColumn(8).getInt();
+      monster.constitution = coreQuery.getColumn(9).getInt();
+      monster.intelligence = coreQuery.getColumn(10).getInt();
+      monster.wisdom = coreQuery.getColumn(11).getInt();
+      monster.charisma = coreQuery.getColumn(12).getInt();
+      monster.challengeRating = coreQuery.getColumn(13).getString();
     }
 
     // Now, fetch all the additional details from the join tables
+    monster.speeds = getMonsterSpeeds(monsterId, db);
     monster.skills = getMonsterSkills(monsterId, db);
     monster.savingThrows = getMonsterSavingThrows(monsterId, db);
     monster.senses = getMonsterSenses(monsterId, db);
@@ -117,6 +118,24 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
 }
 
 // --- Implement the new data fetching functions ---
+std::vector<std::string> getMonsterSpeeds(int monsterId, SQLite::Database &db) {
+  std::vector<std::string> speeds;
+  try {
+    SQLite::Statement query(
+        db, "SELECT SpeedType, Value FROM Monster_Speeds WHERE MonsterID = ?");
+    query.bind(1, monsterId);
+    while (query.executeStep()) {
+      std::stringstream ss;
+      ss << query.getColumn(0).getString() << " "
+         << query.getColumn(1).getString();
+      speeds.push_back(ss.str());
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "SQLite error in getMonsterSpeeds: " << e.what() << std::endl;
+  }
+  return speeds;
+}
+
 std::vector<std::string> getMonsterSkills(int monsterId, SQLite::Database &db) {
   std::vector<std::string> skills;
   try {
@@ -394,161 +413,148 @@ void shutdownImGui() {
   ImGui::DestroyContext();
 }
 
-// --- New UI Functions ---
-void renderStatBlock(const Monster &monster) {
-  ImGui::Begin("Monster Statblock", nullptr,
-               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse |
-                   ImGuiWindowFlags_MenuBar);
+// Helper function to render a list of strings
+void renderStringList(const char *label, const std::vector<std::string> &list) {
+  if (!list.empty()) {
+    ImGui::Text("%s", label);
+    ImGui::SameLine();
+    std::stringstream ss;
+    for (size_t i = 0; i < list.size(); ++i) {
+      ss << list[i];
+      if (i < list.size() - 1) {
+        ss << ", ";
+      }
+    }
+    ImGui::TextWrapped("%s", ss.str().c_str());
+  }
+}
 
-  ImGui::PushStyleColor(
-      ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f)); // Gold color for headers
+// Helper function to create a labeled field
+void renderLabeledField(const char *label, const char *value) {
+  ImGui::Text("%s", label);
+  ImGui::SameLine();
+  ImGui::Text("%s", value);
+}
+
+// Helper function to calculate a modifier from a stat score
+int calculateModifier(int score) { return (score - 10) / 2; }
+
+void renderStatBlock(const Monster &monster) {
+  ImGui::SetNextWindowSize(ImVec2(500, 700), ImGuiCond_FirstUseEver);
+  ImGui::Begin("Monster Statblock", nullptr, ImGuiWindowFlags_MenuBar);
+
+  // Header section
+  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
   ImGui::Text("%s", monster.name.c_str());
   ImGui::PopStyleColor();
   ImGui::Text("Size %s, Type %s, Alignment %s", monster.size.c_str(),
               monster.type.c_str(), monster.alignment.c_str());
   ImGui::Separator();
 
-  ImGui::Text("--- Core Stats ---");
-  ImGui::Columns(2, "CoreStats", false);
+  // Core Stats
+  ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
+  if (ImGui::CollapsingHeader("Core Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
+    if (ImGui::BeginTable("CoreStatsTable", 2,
+                          ImGuiTableFlags_SizingFixedFit)) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      renderLabeledField("Armor Class:",
+                         std::to_string(monster.armorClass).c_str());
+      ImGui::TableSetColumnIndex(1);
+      ImGui::Text("Challenge Rating: %s", monster.challengeRating.c_str());
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::Text("Hit Points: %d (%s)", monster.hitPoints,
+                  monster.hitDice.c_str());
+      ImGui::TableSetColumnIndex(1);
+      renderStringList("Speeds:", monster.speeds);
+      ImGui::EndTable();
+    }
+    ImGui::PopStyleColor();
+  }
+  ImGui::PopStyleColor();
 
-  // Left column
-  ImGui::Text("Armor Class: %d", monster.armorClass);
-  ImGui::Text("Hit Points: %d (%s)", monster.hitPoints,
-              monster.hitDice.c_str());
-  ImGui::Text("Speed: %s", monster.speed.c_str());
-
-  // Switch to right column
-  ImGui::NextColumn();
-
-  // Right column
-  ImGui::Text("STR: %d", monster.strength);
-  ImGui::Text("DEX: %d", monster.dexterity);
-  ImGui::Text("CON: %d", monster.constitution);
-  ImGui::Text("INT: %d", monster.intelligence);
-  ImGui::Text("WIS: %d", monster.wisdom);
-  ImGui::Text("CHA: %d", monster.charisma);
-
-  ImGui::Columns(1); // Revert to a single column
   ImGui::Separator();
 
-  ImGui::Text("Challenge Rating: %s", monster.challengeRating.c_str());
-  if (!monster.savingThrows.empty()) {
-    ImGui::Text("Saving Throws: %s",
-                [&]() {
-                  std::stringstream ss;
-                  for (size_t i = 0; i < monster.savingThrows.size(); ++i) {
-                    ss << monster.savingThrows[i];
-                    if (i < monster.savingThrows.size() - 1) {
-                      ss << ", ";
-                    }
-                  }
-                  return ss.str();
-                }()
-                    .c_str());
+  // The six core attributes in a clean, horizontal format
+  ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
+  if (ImGui::CollapsingHeader("Attributes", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
+    if (ImGui::BeginTable("AttributeTable", 6,
+                          ImGuiTableFlags_SizingFixedFit |
+                              ImGuiTableFlags_NoHostExtendX)) {
+      ImGui::TableSetupColumn("STR");
+      ImGui::TableSetupColumn("DEX");
+      ImGui::TableSetupColumn("CON");
+      ImGui::TableSetupColumn("INT");
+      ImGui::TableSetupColumn("WIS");
+      ImGui::TableSetupColumn("CHA");
+      ImGui::TableHeadersRow();
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::Text("%d (%s%d)", monster.strength,
+                  calculateModifier(monster.strength) >= 0 ? "+" : "",
+                  calculateModifier(monster.strength));
+      ImGui::TableSetColumnIndex(1);
+      ImGui::Text("%d (%s%d)", monster.dexterity,
+                  calculateModifier(monster.dexterity) >= 0 ? "+" : "",
+                  calculateModifier(monster.dexterity));
+      ImGui::TableSetColumnIndex(2);
+      ImGui::Text("%d (%s%d)", monster.constitution,
+                  calculateModifier(monster.constitution) >= 0 ? "+" : "",
+                  calculateModifier(monster.constitution));
+      ImGui::TableSetColumnIndex(3);
+      ImGui::Text("%d (%s%d)", monster.intelligence,
+                  calculateModifier(monster.intelligence) >= 0 ? "+" : "",
+                  calculateModifier(monster.intelligence));
+      ImGui::TableSetColumnIndex(4);
+      ImGui::Text("%d (%s%d)", monster.wisdom,
+                  calculateModifier(monster.wisdom) >= 0 ? "+" : "",
+                  calculateModifier(monster.wisdom));
+      ImGui::TableSetColumnIndex(5);
+      ImGui::Text("%d (%s%d)", monster.charisma,
+                  calculateModifier(monster.charisma) >= 0 ? "+" : "",
+                  calculateModifier(monster.charisma));
+      ImGui::EndTable();
+    }
+    ImGui::PopStyleColor();
   }
+  ImGui::PopStyleColor();
 
-  if (!monster.skills.empty()) {
-    ImGui::Text("Skills: %s",
-                [&]() {
-                  std::stringstream ss;
-                  for (size_t i = 0; i < monster.skills.size(); ++i) {
-                    ss << monster.skills[i];
-                    if (i < monster.skills.size() - 1) {
-                      ss << ", ";
-                    }
-                  }
-                  return ss.str();
-                }()
-                    .c_str());
+  ImGui::Separator();
+
+  // Additional Info Section
+  ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
+  if (ImGui::CollapsingHeader("Additional Information")) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
+    renderStringList("Saving Throws:", monster.savingThrows);
+    renderStringList("Skills:", monster.skills);
+    renderStringList("Senses:", monster.senses);
+    renderStringList("Damage Vulnerabilities:", monster.damageVulnerabilities);
+    renderStringList("Damage Resistances:", monster.damageResistances);
+    renderStringList("Damage Immunities:", monster.damageImmunities);
+    renderStringList("Condition Immunities:", monster.conditionImmunities);
+    ImGui::PopStyleColor();
   }
+  ImGui::PopStyleColor();
 
-  if (!monster.senses.empty()) {
-    ImGui::Text("Senses: %s",
-                [&]() {
-                  std::stringstream ss;
-                  for (size_t i = 0; i < monster.senses.size(); ++i) {
-                    ss << monster.senses[i];
-                    if (i < monster.senses.size() - 1) {
-                      ss << ", ";
-                    }
-                  }
-                  return ss.str();
-                }()
-                    .c_str());
-  }
-
-  if (!monster.damageVulnerabilities.empty()) {
-    ImGui::Text("Damage Vulnerabilities: %s",
-                [&]() {
-                  std::stringstream ss;
-                  for (size_t i = 0; i < monster.damageVulnerabilities.size();
-                       ++i) {
-                    ss << monster.damageVulnerabilities[i];
-                    if (i < monster.damageVulnerabilities.size() - 1) {
-                      ss << ", ";
-                    }
-                  }
-                  return ss.str();
-                }()
-                    .c_str());
-  }
-
-  if (!monster.damageResistances.empty()) {
-    ImGui::Text("Damage Resistances: %s",
-                [&]() {
-                  std::stringstream ss;
-                  for (size_t i = 0; i < monster.damageResistances.size();
-                       ++i) {
-                    ss << monster.damageResistances[i];
-                    if (i < monster.damageResistances.size() - 1) {
-                      ss << ", ";
-                    }
-                  }
-                  return ss.str();
-                }()
-                    .c_str());
-  }
-
-  if (!monster.damageImmunities.empty()) {
-    ImGui::Text("Damage Immunities: %s",
-                [&]() {
-                  std::stringstream ss;
-                  for (size_t i = 0; i < monster.damageImmunities.size(); ++i) {
-                    ss << monster.damageImmunities[i];
-                    if (i < monster.damageImmunities.size() - 1) {
-                      ss << ", ";
-                    }
-                  }
-                  return ss.str();
-                }()
-                    .c_str());
-  }
-
-  if (!monster.conditionImmunities.empty()) {
-    ImGui::Text("Condition Immunities: %s",
-                [&]() {
-                  std::stringstream ss;
-                  for (size_t i = 0; i < monster.conditionImmunities.size();
-                       ++i) {
-                    ss << monster.conditionImmunities[i];
-                    if (i < monster.conditionImmunities.size() - 1) {
-                      ss << ", ";
-                    }
-                  }
-                  return ss.str();
-                }()
-                    .c_str());
-  }
-
+  // Abilities Section
   if (!monster.abilities.empty()) {
     ImGui::Separator();
-    ImGui::Text("--- Abilities ---");
-    for (const auto &ability : monster.abilities) {
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
-      ImGui::Text("%s: %s", ability.type.c_str(), ability.name.c_str());
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
+    if (ImGui::CollapsingHeader("Abilities")) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
+      for (const auto &ability : monster.abilities) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
+        ImGui::Text("%s: %s", ability.type.c_str(), ability.name.c_str());
+        ImGui::PopStyleColor();
+        ImGui::TextWrapped("%s", ability.description.c_str());
+        ImGui::Separator();
+      }
       ImGui::PopStyleColor();
-      ImGui::TextWrapped("%s", ability.description.c_str());
     }
+    ImGui::PopStyleColor();
   }
 
   ImGui::End();

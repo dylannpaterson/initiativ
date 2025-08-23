@@ -19,7 +19,7 @@ struct Monster {
   int armorClass;
   int hitPoints;
   std::string hitDice;
-  std::string speed;
+  std::vector<std::string> speeds; // Now a vector to hold all speed types
   int strength;
   int dexterity;
   int constitution;
@@ -47,7 +47,11 @@ struct Monster {
     std::cout << "Armor Class: " << armorClass << std::endl;
     std::cout << "Hit Points: " << hitPoints << " (" << hitDice << ")"
               << std::endl;
-    std::cout << "Speed: " << speed << std::endl;
+    std::cout << "Speed: ";
+    for (const auto &speed : speeds) {
+      std::cout << speed << "; ";
+    }
+    std::cout << std::endl;
     std::cout << "STR: " << strength << " | DEX: " << dexterity
               << " | CON: " << constitution << " | INT: " << intelligence
               << " | WIS: " << wisdom << " | CHA: " << charisma << std::endl;
