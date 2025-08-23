@@ -3,8 +3,11 @@
 #include <SDL2/SDL_opengl.h> // We will use this with ImGui
 #include <SQLiteCpp/SQLiteCpp.h>
 #include <algorithm> // For std::transform
+#include <algorithm> // For std::sort
 #include <cctype>    // For ::tolower
+#include <ctime>     // To seed the winds of chance
 #include <iostream>
+#include <random> // For the casting of lots
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -22,11 +25,17 @@ static Monster g_currentMonster;
 static SQLite::Database *g_db = nullptr;
 static char g_searchBuffer[256] = ""; // Buffer for the search input
 static std::vector<std::string>
-    g_filteredMonsterNames;                  // To hold the filtered names
-static std::vector<Monster> g_encounterList; // Our assembled forces
+    g_filteredMonsterNames; // To hold the filtered names
+static std::vector<Combatant>
+    g_encounterList; // Our assembled forces are now Combatants
+static char g_newPlayerNameBuffer[256] = ""; // Buffer for the new player's name
+static int g_newPlayerInitiative = 0; // Buffer for the new player's initiative
+static int g_currentTurnIndex = -1;   // -1 indicates combat has not begun
+static bool g_combatHasBegun = false; // Is the battle joined?
 
 // --- Function Declarations ---
 void renderBestiaryUI();
+void renderCombatUI();    // The new battlefield view
 void renderEncounterUI(); // Our new command tent
 void renderStatBlock(const Monster &monster);
 void initImGui(SDL_Window *window, SDL_GLContext gl_context);
@@ -314,6 +323,9 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
+  // Seed the random number generator once at the start of the campaign
+  srand(time(nullptr));
+
   const char *glsl_version = "#version 130";
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -369,11 +381,17 @@ int main(int argc, char *argv[]) {
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
-    // Render the bestiary UI
-    renderBestiaryUI();
-
-    // Render encounter UI
-    renderEncounterUI(); // Display the new encounter window
+    // --- Conditional Rendering based on Combat State ---
+    if (g_combatHasBegun) {
+      renderEncounterUI(); // The roster is always visible
+      renderCombatUI();    // The new combat console
+    } else {
+      renderBestiaryUI(); // Show setup tools
+      renderEncounterUI();
+      if (!g_currentMonster.name.empty()) {
+        renderStatBlock(g_currentMonster); // Show statblock during setup
+      }
+    }
 
     // Rendering
     ImGui::Render();
@@ -631,7 +649,22 @@ void renderBestiaryUI() {
   if (!g_filteredMonsterNames.empty() && g_selectedMonsterIndex >= 0 &&
       g_selectedMonsterIndex < g_filteredMonsterNames.size()) {
     if (ImGui::Button("Add to Encounter")) {
-      g_encounterList.push_back(g_currentMonster);
+      // Create a new combatant from the selected monster
+      Combatant newCombatant(g_currentMonster);
+
+      // Strategically assign a unique name (e.g., Orc 1, Orc 2)
+      int count = 0;
+      for (const auto &combatant : g_encounterList) {
+        if (combatant.base.name == newCombatant.base.name) {
+          count++;
+        }
+      }
+      if (count > 0) {
+        newCombatant.displayName =
+            newCombatant.base.name + " " + std::to_string(count + 1);
+      }
+
+      g_encounterList.push_back(newCombatant);
     }
   }
 
@@ -644,30 +677,196 @@ void renderBestiaryUI() {
   }
 }
 
-// --- New Function to Render the Encounter List ---
 void renderEncounterUI() {
   ImGui::Begin("Encounter");
 
+  // --- Section to Add Player Characters ---
+  ImGui::SeparatorText("Party");
+
+  ImGui::PushItemWidth(150);
+  ImGui::InputText("Player Name", g_newPlayerNameBuffer,
+                   IM_ARRAYSIZE(g_newPlayerNameBuffer));
+  ImGui::PopItemWidth();
+
+  ImGui::SameLine();
+
+  ImGui::PushItemWidth(80);
+  // --- TACTICAL CHANGE 1: Input field is now a pure number entry ---
+  ImGui::InputInt("Initiative", &g_newPlayerInitiative, 0, 0,
+                  ImGuiInputTextFlags_CharsDecimal);
+  ImGui::PopItemWidth();
+
+  ImGui::SameLine();
+
+  if (ImGui::Button("Add Player")) {
+    if (strlen(g_newPlayerNameBuffer) > 0) {
+      Combatant newPlayer;
+      newPlayer.isPlayer = true;
+      newPlayer.displayName = g_newPlayerNameBuffer;
+      newPlayer.initiative = g_newPlayerInitiative;
+      newPlayer.currentHitPoints = 0;
+      g_encounterList.push_back(newPlayer);
+
+      g_newPlayerNameBuffer[0] = '\0';
+      g_newPlayerInitiative = 0;
+    }
+  }
+
+  ImGui::SeparatorText("Combatants");
+
+  if (!g_encounterList.empty()) {
+    if (!g_combatHasBegun) {
+      if (ImGui::Button("Begin Combat")) {
+        for (auto &combatant : g_encounterList) {
+          if (!combatant.isPlayer) {
+            int modifier = calculateModifier(combatant.base.dexterity);
+            combatant.initiative = (rand() % 20 + 1) + modifier;
+          }
+        }
+        std::sort(g_encounterList.begin(), g_encounterList.end(),
+                  [](const Combatant &a, const Combatant &b) {
+                    return a.initiative > b.initiative;
+                  });
+        g_currentTurnIndex = 0;
+        g_combatHasBegun = true; // Raise the banner!
+      }
+    } else {
+      if (ImGui::Button("End Combat")) {
+        g_currentTurnIndex = -1;
+        g_combatHasBegun = false; // Lower the banner
+      }
+    }
+
+    // "Next/Previous Turn" buttons should only be active during combat
+    if (g_combatHasBegun) {
+      ImGui::SameLine();
+      if (ImGui::Button("Next Turn")) {
+        if (g_currentTurnIndex != -1) {
+          g_currentTurnIndex =
+              (g_currentTurnIndex + 1) % g_encounterList.size();
+        }
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Previous Turn")) {
+        if (g_currentTurnIndex != -1) {
+          g_currentTurnIndex =
+              (g_currentTurnIndex - 1 + g_encounterList.size()) %
+              g_encounterList.size();
+        }
+      }
+    }
+  }
+
+  ImGui::Spacing();
+
+  // --- Display the Unified Combatant List ---
+  // (This entire section remains unchanged from the previous version)
   if (g_encounterList.empty()) {
     ImGui::Text("No combatants have been added yet.");
   } else {
-    // We must keep track of which monster to remove
-    int monster_to_remove = -1;
+    int combatant_to_remove = -1;
     for (int i = 0; i < g_encounterList.size(); ++i) {
-      ImGui::Text("%s", g_encounterList[i].name.c_str());
-      ImGui::SameLine();
-      // Each button needs a unique ID, so we use the index 'i'
       ImGui::PushID(i);
-      if (ImGui::Button("Remove")) {
-        monster_to_remove = i;
+
+      bool is_current_turn = (i == g_currentTurnIndex);
+      if (is_current_turn) {
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.9f, 0.6f, 0.0f, 1.0f));
+        ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
       }
+
+      std::string label = g_encounterList[i].displayName + " (" +
+                          std::to_string(g_encounterList[i].initiative) + ")";
+      if (ImGui::Selectable(label.c_str(), is_current_turn)) {
+        g_currentTurnIndex = i;
+      }
+
+      if (is_current_turn) {
+        ImGui::PopStyleColor();
+      }
+
+      ImGui::SameLine(ImGui::GetWindowWidth() - 250);
+
+      ImGui::PushItemWidth(80);
+      ImGui::InputInt("HP", &g_encounterList[i].currentHitPoints, 1, 5,
+                      ImGuiInputTextFlags_CharsDecimal);
+      ImGui::SameLine();
+      ImGui::InputInt("##Initiative", &g_encounterList[i].initiative);
+      ImGui::PopItemWidth();
+      ImGui::SameLine();
+
+      if (ImGui::Button("Remove")) {
+        combatant_to_remove = i;
+      }
+
       ImGui::PopID();
     }
 
-    // If a remove button was pressed, we erase the monster from our list
-    if (monster_to_remove != -1) {
-      g_encounterList.erase(g_encounterList.begin() + monster_to_remove);
+    if (combatant_to_remove != -1) {
+      if (combatant_to_remove == g_currentTurnIndex) {
+        g_currentTurnIndex = -1;
+      }
+      g_encounterList.erase(g_encounterList.begin() + combatant_to_remove);
     }
+  }
+
+  ImGui::End();
+}
+// --- Renders the dedicated UI for an active combat encounter ---
+void renderCombatUI() {
+  if (!g_combatHasBegun || g_currentTurnIndex < 0 ||
+      g_currentTurnIndex >= g_encounterList.size()) {
+    return; // This window only appears during an active turn
+  }
+
+  ImGui::Begin("Combat Operations");
+
+  // Identify the active combatant
+  const Combatant &activeCombatant = g_encounterList[g_currentTurnIndex];
+
+  // Display the current combatant's name
+  ImGui::Text("Current Turn: ");
+  ImGui::SameLine();
+  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
+  ImGui::Text("%s", activeCombatant.displayName.c_str());
+  ImGui::PopStyleColor();
+
+  ImGui::Separator();
+
+  // --- Display abilities if the combatant is a monster ---
+  if (!activeCombatant.isPlayer) {
+    ImGui::SeparatorText("Abilities");
+    const auto &abilities = activeCombatant.base.abilities;
+
+    if (abilities.empty()) {
+      ImGui::Text("This creature has no special abilities.");
+    } else {
+      for (const auto &ability : abilities) {
+        // Future Strategy: Here we will check 'activeCombatant.abilityUses'
+        // If the ability has limited uses and is depleted, we can grey it out.
+        // For now, all abilities are shown as available.
+
+        // Example of future logic:
+        // bool is_available = true;
+        // auto it = activeCombatant.abilityUses.find(ability.name);
+        // if (it != activeCombatant.abilityUses.end() && it->second <= 0) {
+        //     is_available = false;
+        // }
+        // if (!is_available) {
+        //     ImGui::PushStyleColor(ImGuiCol_Text,
+        //     ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+        // }
+
+        ImGui::Text("[%s] %s", ability.type.c_str(), ability.name.c_str());
+        ImGui::TextWrapped("%s", ability.description.c_str());
+        ImGui::Separator();
+
+        // if (!is_available) {
+        //     ImGui::PopStyleColor();
+        // }
+      }
+    }
+  } else {
+    ImGui::Text("Player characters manage their own abilities.");
   }
 
   ImGui::End();

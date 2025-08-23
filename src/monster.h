@@ -2,6 +2,7 @@
 #define MONSTER_H
 
 #include <iostream>
+#include <map> // Required for tracking ability uses
 #include <string>
 #include <vector>
 
@@ -57,6 +58,30 @@ struct Monster {
               << " | WIS: " << wisdom << " | CHA: " << charisma << std::endl;
     std::cout << "Challenge Rating: " << challengeRating << std::endl;
   }
+};
+
+struct Combatant {
+  Monster base;            // The creature's core statistics
+  std::string displayName; // Unique name for this instance, e.g., "Goblin 3"
+  int currentHitPoints;
+  int initiative;
+  bool isPlayer = false; // A flag to identify the party
+
+  // A map to track remaining uses of limited abilities
+  // Key: Ability Name, Value: Remaining Uses
+  std::map<std::string, int> abilityUses;
+
+  // Constructor to build a Combatant from a Monster
+  Combatant(const Monster &monster) : base(monster) {
+    displayName = base.name; // Start with the base name
+    currentHitPoints = base.hitPoints;
+    initiative = 0; // Default initiative
+
+    // Here, you would initialize the abilityUses map based on monster
+    // abilities. For now, we will leave it empty as a placeholder for a future
+    // step.
+  }
+  Combatant() = default;
 };
 
 #endif // MONSTER_H
