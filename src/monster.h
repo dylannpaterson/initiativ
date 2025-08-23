@@ -10,6 +10,12 @@ struct Ability {
   std::string name;
   std::string description;
   std::string type;
+
+  // Direct intelligence from the Ability_Usage table
+  int usesMax =
+      0; // From UsesMax column, 0 means not limited by a set number of uses
+  std::string usageType; // "Per Day", "Recharge", etc.
+  int rechargeValue = 0; // e.g., 5 for "Recharge 5-6"
 };
 
 struct Monster {
@@ -28,6 +34,7 @@ struct Monster {
   int wisdom;
   int charisma;
   std::string challengeRating;
+  std::string languages; // The new field for languages
 
   // New fields for skills, senses, saving throws, and immunities
   std::vector<std::string> skills;
@@ -73,13 +80,18 @@ struct Combatant {
 
   // Constructor to build a Combatant from a Monster
   Combatant(const Monster &monster) : base(monster) {
-    displayName = base.name; // Start with the base name
+    displayName = base.name;
     currentHitPoints = base.hitPoints;
-    initiative = 0; // Default initiative
+    initiative = 0;
+    isPlayer = false;
 
-    // Here, you would initialize the abilityUses map based on monster
-    // abilities. For now, we will leave it empty as a placeholder for a future
-    // step.
+    // --- Corrected Logic: Initialize from direct Ability object data ---
+    for (const auto &ability : base.abilities) {
+      // If the database indicates a maximum number of uses, we record it.
+      if (ability.usesMax > 0) {
+        abilityUses[ability.name] = ability.usesMax;
+      }
+    }
   }
   Combatant() = default;
 };

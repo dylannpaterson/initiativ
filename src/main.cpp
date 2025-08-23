@@ -56,7 +56,9 @@ std::vector<std::string> getMonsterDamageResistances(int monsterId,
                                                      SQLite::Database &db);
 std::vector<std::string> getMonsterDamageVulnerabilities(int monsterId,
                                                          SQLite::Database &db);
-std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db);
+std::vector<Ability>
+getMonsterAbilities(int monsterId,
+                    SQLite::Database &db); // Corrected declaration
 std::vector<std::string> getMonsterSpeeds(int monsterId, SQLite::Database &db);
 
 // Function to fetch all monster names from the database
@@ -93,7 +95,7 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
     SQLite::Statement coreQuery(
         db, "SELECT Name, Size, Type, Alignment, ArmorClass, HitPoints_Avg, "
             "HitPoints_Formula, Strength, Dexterity, Constitution, "
-            "Intelligence, Wisdom, Charisma, ChallengeRating "
+            "Intelligence, Wisdom, Charisma, ChallengeRating, Languages "
             "FROM Monsters WHERE MonsterID = ?");
 
     coreQuery.bind(1, monsterId);
@@ -113,6 +115,7 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
       monster.wisdom = coreQuery.getColumn(11).getInt();
       monster.charisma = coreQuery.getColumn(12).getInt();
       monster.challengeRating = coreQuery.getColumn(13).getString();
+      monster.languages = coreQuery.getColumn(14).getString();
     }
 
     // Now, fetch all the additional details from the join tables
@@ -293,26 +296,6 @@ std::vector<std::string> getMonsterDamageVulnerabilities(int monsterId,
               << std::endl;
   }
   return vulnerabilities;
-}
-
-std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db) {
-  std::vector<Ability> abilities;
-  try {
-    SQLite::Statement query(db, "SELECT Name, Description, AbilityType FROM "
-                                "Abilities WHERE MonsterID = ?");
-    query.bind(1, monsterId);
-    while (query.executeStep()) {
-      Ability ability;
-      ability.name = query.getColumn(0).getString();
-      ability.description = query.getColumn(1).getString();
-      ability.type = query.getColumn(2).getString();
-      abilities.push_back(ability);
-    }
-  } catch (const std::exception &e) {
-    std::cerr << "SQLite error in getMonsterAbilities: " << e.what()
-              << std::endl;
-  }
-  return abilities;
 }
 
 int main(int argc, char *argv[]) {
@@ -553,17 +536,24 @@ void renderStatBlock(const Monster &monster) {
 
   ImGui::Separator();
 
-  // Additional Info Section
+  // --- Tactical Change: Consolidated and Corrected Information Section ---
   ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
   if (ImGui::CollapsingHeader("Additional Information")) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
+
     renderStringList("Saving Throws:", monster.savingThrows);
     renderStringList("Skills:", monster.skills);
-    renderStringList("Senses:", monster.senses);
     renderStringList("Damage Vulnerabilities:", monster.damageVulnerabilities);
     renderStringList("Damage Resistances:", monster.damageResistances);
     renderStringList("Damage Immunities:", monster.damageImmunities);
     renderStringList("Condition Immunities:", monster.conditionImmunities);
+
+    // Senses and Languages are now rendered correctly and only once here.
+    renderStringList("Senses:", monster.senses);
+    if (!monster.languages.empty()) {
+      renderLabeledField("Languages:", monster.languages.c_str());
+    }
+
     ImGui::PopStyleColor();
   }
   ImGui::PopStyleColor();
@@ -669,12 +659,6 @@ void renderBestiaryUI() {
   }
 
   ImGui::End();
-
-  // The statblock display remains unchanged, loyal to the currently selected
-  // monster
-  if (!g_currentMonster.name.empty()) {
-    renderStatBlock(g_currentMonster);
-  }
 }
 
 void renderEncounterUI() {
@@ -815,59 +799,101 @@ void renderEncounterUI() {
 void renderCombatUI() {
   if (!g_combatHasBegun || g_currentTurnIndex < 0 ||
       g_currentTurnIndex >= g_encounterList.size()) {
-    return; // This window only appears during an active turn
+    return;
   }
 
   ImGui::Begin("Combat Operations");
 
-  // Identify the active combatant
-  const Combatant &activeCombatant = g_encounterList[g_currentTurnIndex];
+  Combatant &activeCombatant = g_encounterList[g_currentTurnIndex];
 
-  // Display the current combatant's name
   ImGui::Text("Current Turn: ");
   ImGui::SameLine();
   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
   ImGui::Text("%s", activeCombatant.displayName.c_str());
   ImGui::PopStyleColor();
-
   ImGui::Separator();
 
-  // --- Display abilities if the combatant is a monster ---
   if (!activeCombatant.isPlayer) {
     ImGui::SeparatorText("Abilities");
-    const auto &abilities = activeCombatant.base.abilities;
-
-    if (abilities.empty()) {
+    if (activeCombatant.base.abilities.empty()) {
       ImGui::Text("This creature has no special abilities.");
     } else {
-      for (const auto &ability : abilities) {
-        // Future Strategy: Here we will check 'activeCombatant.abilityUses'
-        // If the ability has limited uses and is depleted, we can grey it out.
-        // For now, all abilities are shown as available.
+      auto &usesMap = activeCombatant.abilityUses;
+      for (const auto &ability : activeCombatant.base.abilities) {
+        ImGui::PushID(&ability);
 
-        // Example of future logic:
-        // bool is_available = true;
-        // auto it = activeCombatant.abilityUses.find(ability.name);
-        // if (it != activeCombatant.abilityUses.end() && it->second <= 0) {
-        //     is_available = false;
-        // }
-        // if (!is_available) {
-        //     ImGui::PushStyleColor(ImGuiCol_Text,
-        //     ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-        // }
+        bool is_limited_by_uses = (ability.usesMax > 0);
+        int remaining_uses = is_limited_by_uses ? usesMap[ability.name] : 0;
+
+        if (is_limited_by_uses && remaining_uses <= 0) {
+          ImGui::PushStyleColor(
+              ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+        }
 
         ImGui::Text("[%s] %s", ability.type.c_str(), ability.name.c_str());
         ImGui::TextWrapped("%s", ability.description.c_str());
-        ImGui::Separator();
 
-        // if (!is_available) {
-        //     ImGui::PopStyleColor();
-        // }
+        // --- Display usage information ---
+        if (is_limited_by_uses) {
+          ImGui::SameLine();
+          if (remaining_uses <= 0)
+            ImGui::BeginDisabled();
+          if (ImGui::Button("Use")) {
+            usesMap[ability.name]--;
+          }
+          if (remaining_uses <= 0)
+            ImGui::EndDisabled();
+
+          ImGui::Text("Uses remaining: %d/%d", remaining_uses, ability.usesMax);
+        } else if (ability.rechargeValue > 0) {
+          ImGui::Text("Usage: Recharge on a roll of %d-6",
+                      ability.rechargeValue);
+        }
+
+        if (is_limited_by_uses && remaining_uses <= 0) {
+          ImGui::PopStyleColor();
+        }
+
+        ImGui::Separator();
+        ImGui::PopID();
       }
     }
   } else {
     ImGui::Text("Player characters manage their own abilities.");
   }
-
   ImGui::End();
+}
+
+std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db) {
+  std::vector<Ability> abilities;
+  try {
+    // This query performs a LEFT JOIN to gather usage data where it exists.
+    SQLite::Statement query(
+        db, "SELECT A.Name, A.Description, A.AbilityType, "
+            "AU.UsageType, AU.UsesMax, AU.RechargeValue "
+            "FROM Abilities AS A "
+            "LEFT JOIN Ability_Usage AS AU ON A.AbilityID = AU.AbilityID "
+            "WHERE A.MonsterID = ?");
+    query.bind(1, monsterId);
+
+    while (query.executeStep()) {
+      Ability ability;
+      ability.name = query.getColumn(0).getString();
+      ability.description = query.getColumn(1).getString();
+      ability.type = query.getColumn(2).getString();
+
+      // These columns can be NULL if there's no entry in Ability_Usage
+      if (!query.getColumn(3).isNull()) {
+        ability.usageType = query.getColumn(3).getString();
+        ability.usesMax = query.getColumn(4).getInt();
+        ability.rechargeValue = query.getColumn(5).getInt();
+      }
+
+      abilities.push_back(ability);
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "SQLite error in getMonsterAbilities: " << e.what()
+              << std::endl;
+  }
+  return abilities;
 }
