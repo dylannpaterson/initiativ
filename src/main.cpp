@@ -2,6 +2,8 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h> // We will use this with ImGui
 #include <SQLiteCpp/SQLiteCpp.h>
+#include <algorithm> // For std::transform
+#include <cctype>    // For ::tolower
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -18,9 +20,14 @@ std::vector<std::string> g_monsterNames;
 static int g_selectedMonsterIndex = 0;
 static Monster g_currentMonster;
 static SQLite::Database *g_db = nullptr;
+static char g_searchBuffer[256] = ""; // Buffer for the search input
+static std::vector<std::string>
+    g_filteredMonsterNames;                  // To hold the filtered names
+static std::vector<Monster> g_encounterList; // Our assembled forces
 
 // --- Function Declarations ---
 void renderBestiaryUI();
+void renderEncounterUI(); // Our new command tent
 void renderStatBlock(const Monster &monster);
 void initImGui(SDL_Window *window, SDL_GLContext gl_context);
 void shutdownImGui();
@@ -337,9 +344,10 @@ int main(int argc, char *argv[]) {
   std::cout << "Successfully fetched " << g_monsterNames.size()
             << " monster names." << std::endl;
 
-  // Initialize the first monster to display
-  if (!g_monsterNames.empty()) {
-    g_currentMonster = getMonsterByName(db, g_monsterNames[0]);
+  // Initialize the UI with the full list and select the first monster
+  g_filteredMonsterNames = g_monsterNames;
+  if (!g_filteredMonsterNames.empty()) {
+    g_currentMonster = getMonsterByName(db, g_filteredMonsterNames[0]);
   }
 
   // --- Main application loop ---
@@ -363,6 +371,9 @@ int main(int argc, char *argv[]) {
 
     // Render the bestiary UI
     renderBestiaryUI();
+
+    // Render encounter UI
+    renderEncounterUI(); // Display the new encounter window
 
     // Rendering
     ImGui::Render();
@@ -400,7 +411,7 @@ void initImGui(SDL_Window *window, SDL_GLContext gl_context) {
 
   // Load a font to improve readability
   io.Fonts->AddFontFromFileTTF("../data/fonts/static/Roboto-Regular.ttf",
-                               20.0f);
+                               36.0f);
 
   // Setup Platform/Renderer backends
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
@@ -565,29 +576,99 @@ void renderBestiaryUI() {
 
   ImGui::Text("Select a monster:");
 
-  // The ListBox takes a function pointer to retrieve names, or an array of
-  // char*
+  // A search bar to filter the list. If the text changes, we reset the
+  // selection.
+  if (ImGui::InputText("Search", g_searchBuffer,
+                       IM_ARRAYSIZE(g_searchBuffer))) {
+    g_selectedMonsterIndex = 0; // Reset selection when filter changes
+  }
+
+  // Filter the master list of monster names into our temporary list
+  std::string filter = g_searchBuffer;
+  std::transform(filter.begin(), filter.end(), filter.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+
+  g_filteredMonsterNames.clear();
+  if (filter.empty()) {
+    // If the search is empty, show the full list
+    g_filteredMonsterNames = g_monsterNames;
+  } else {
+    for (const auto &name : g_monsterNames) {
+      std::string lower_name = name;
+      std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(),
+                     [](unsigned char c) { return std::tolower(c); });
+
+      if (lower_name.find(filter) != std::string::npos) {
+        g_filteredMonsterNames.push_back(name);
+      }
+    }
+  }
+
+  // The ListBox now operates on our filtered list of names
   if (ImGui::ListBox(
           "##MonsterList", &g_selectedMonsterIndex,
           [](void *data, int idx) -> const char * {
-            std::vector<std::string> *names = (std::vector<std::string> *)data;
-            return (*names)[idx].c_str();
+            auto *names = static_cast<std::vector<std::string> *>(data);
+            if (idx >= 0 && idx < names->size()) {
+              return (*names)[idx].c_str();
+            }
+            return ""; // Should be an impossible state
           },
-          (void *)&g_monsterNames, g_monsterNames.size(),
+          (void *)&g_filteredMonsterNames, g_filteredMonsterNames.size(),
           20)) { // 20 is the number of visible items
-    // This is where the magic happens. When the selection changes, we fetch the
-    // new monster.
+    // When a selection is made, fetch the monster by its name from the filtered
+    // list
     if (g_selectedMonsterIndex >= 0 &&
-        g_selectedMonsterIndex < g_monsterNames.size()) {
-      g_currentMonster =
-          getMonsterByName(*g_db, g_monsterNames[g_selectedMonsterIndex]);
+        g_selectedMonsterIndex < g_filteredMonsterNames.size()) {
+      g_currentMonster = getMonsterByName(
+          *g_db, g_filteredMonsterNames[g_selectedMonsterIndex]);
+    }
+  }
+
+  ImGui::Separator(); // A clean division
+
+  // The button to add the selected monster to our forces
+  if (!g_filteredMonsterNames.empty() && g_selectedMonsterIndex >= 0 &&
+      g_selectedMonsterIndex < g_filteredMonsterNames.size()) {
+    if (ImGui::Button("Add to Encounter")) {
+      g_encounterList.push_back(g_currentMonster);
     }
   }
 
   ImGui::End();
 
-  // Display the statblock in a separate window
+  // The statblock display remains unchanged, loyal to the currently selected
+  // monster
   if (!g_currentMonster.name.empty()) {
     renderStatBlock(g_currentMonster);
   }
+}
+
+// --- New Function to Render the Encounter List ---
+void renderEncounterUI() {
+  ImGui::Begin("Encounter");
+
+  if (g_encounterList.empty()) {
+    ImGui::Text("No combatants have been added yet.");
+  } else {
+    // We must keep track of which monster to remove
+    int monster_to_remove = -1;
+    for (int i = 0; i < g_encounterList.size(); ++i) {
+      ImGui::Text("%s", g_encounterList[i].name.c_str());
+      ImGui::SameLine();
+      // Each button needs a unique ID, so we use the index 'i'
+      ImGui::PushID(i);
+      if (ImGui::Button("Remove")) {
+        monster_to_remove = i;
+      }
+      ImGui::PopID();
+    }
+
+    // If a remove button was pressed, we erase the monster from our list
+    if (monster_to_remove != -1) {
+      g_encounterList.erase(g_encounterList.begin() + monster_to_remove);
+    }
+  }
+
+  ImGui::End();
 }
