@@ -1,24 +1,41 @@
+#ifndef MONSTER_H
+#define MONSTER_H
+
+#include <iostream>
 #include <string>
-#include <vector>
 
-// A simple structure for a single ability
-struct Ability {
-  std::string name;
-  std::string description;
-};
-
-// The main structure to hold all monster data
 struct Monster {
-  int id;
   std::string name;
+  std::string size;
+  std::string type;
+  std::string alignment;
   int armorClass;
   int hitPoints;
-  std::string hpFormula;
+  std::string speed;
+  int strength;
+  int dexterity;
+  int constitution;
+  int intelligence;
+  int wisdom;
+  int charisma;
+  std::string challengeRating;
+  // We will add more fields like skills, senses, actions, etc. later.
+  // For now, this is a solid foundation.
 
-  // We will store abilities as a list of simple structs
-  std::vector<Ability> traits;
-  std::vector<Ability> actions;
-  std::vector<Ability> legendaryActions;
-
-  // We can add spells and other details later
+  // A simple function to display the monster's core stats
+  void display() const {
+    std::cout << "Name: " << name << std::endl;
+    std::cout << "Size: " << size << std::endl;
+    std::cout << "Type: " << type << std::endl;
+    std::cout << "Alignment: " << alignment << std::endl;
+    std::cout << "Armor Class: " << armorClass << std::endl;
+    std::cout << "Hit Points: " << hitPoints << std::endl;
+    std::cout << "Speed: " << speed << std::endl;
+    std::cout << "STR: " << strength << " | DEX: " << dexterity
+              << " | CON: " << constitution << " | INT: " << intelligence
+              << " | WIS: " << wisdom << " | CHA: " << charisma << std::endl;
+    std::cout << "Challenge Rating: " << challengeRating << std::endl;
+  }
 };
+
+#endif // MONSTER_H
