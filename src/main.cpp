@@ -33,10 +33,17 @@ static int g_newPlayerInitiative = 0; // Buffer for the new player's initiative
 static int g_currentTurnIndex = -1;   // -1 indicates combat has not begun
 static bool g_combatHasBegun = false; // Is the battle joined?
 
+// --- Combat Log ---
+struct LogEntry {
+  std::string message;
+};
+std::vector<LogEntry> g_combatLog;
+
 // --- Function Declarations ---
 void renderBestiaryUI();
 void renderCombatUI();    // The new battlefield view
 void renderEncounterUI(); // Our new command tent
+void renderCombatLogUI();
 void renderStatBlock(const Monster &monster);
 void initImGui(SDL_Window *window, SDL_GLContext gl_context);
 void shutdownImGui();
@@ -60,6 +67,7 @@ std::vector<Ability>
 getMonsterAbilities(int monsterId,
                     SQLite::Database &db); // Corrected declaration
 std::vector<std::string> getMonsterSpeeds(int monsterId, SQLite::Database &db);
+std::vector<int> getMonsterSpellSlots(int monsterId, SQLite::Database &db);
 
 // Function to fetch all monster names from the database
 std::vector<std::string> getMonsterNames(SQLite::Database &db) {
@@ -73,6 +81,28 @@ std::vector<std::string> getMonsterNames(SQLite::Database &db) {
     std::cerr << "SQLite error in getMonsterNames: " << e.what() << std::endl;
   }
   return monsterNames;
+}
+
+// Function to fetch a single monster's details by name
+std::vector<int> getMonsterSpellSlots(int monsterId, SQLite::Database &db) {
+  std::vector<int> spellSlots(9, 0);
+  try {
+    SQLite::Statement query(
+        db,
+        "SELECT SpellLevel, Slots FROM Monster_SpellSlots WHERE MonsterID = ?");
+    query.bind(1, monsterId);
+    while (query.executeStep()) {
+      int level = query.getColumn(0).getInt();
+      int slots = query.getColumn(1).getInt();
+      if (level >= 1 && level <= 9) {
+        spellSlots[level - 1] = slots;
+      }
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "SQLite error in getMonsterSpellSlots: " << e.what()
+              << std::endl;
+  }
+  return spellSlots;
 }
 
 // Function to fetch a single monster's details by name
@@ -129,6 +159,7 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
     monster.damageVulnerabilities =
         getMonsterDamageVulnerabilities(monsterId, db);
     monster.abilities = getMonsterAbilities(monsterId, db);
+    monster.spellSlots = getMonsterSpellSlots(monsterId, db);
 
   } catch (const std::exception &e) {
     std::cerr << "SQLite error in getMonsterByName: " << e.what() << std::endl;
@@ -401,7 +432,7 @@ void initImGui(SDL_Window *window, SDL_GLContext gl_context) {
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
-  (void)io;
+  (void)io; // Suppress warning about unused variable
   io.ConfigFlags |=
       ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
   io.ConfigFlags |=
@@ -675,7 +706,6 @@ void renderEncounterUI() {
   ImGui::SameLine();
 
   ImGui::PushItemWidth(80);
-  // --- TACTICAL CHANGE 1: Input field is now a pure number entry ---
   ImGui::InputInt("Initiative", &g_newPlayerInitiative, 0, 0,
                   ImGuiInputTextFlags_CharsDecimal);
   ImGui::PopItemWidth();
@@ -688,7 +718,8 @@ void renderEncounterUI() {
       newPlayer.isPlayer = true;
       newPlayer.displayName = g_newPlayerNameBuffer;
       newPlayer.initiative = g_newPlayerInitiative;
-      newPlayer.currentHitPoints = 0;
+      newPlayer.currentHitPoints = 0; // Not tracked
+      newPlayer.maxHitPoints = 0;     // Not tracked
       g_encounterList.push_back(newPlayer);
 
       g_newPlayerNameBuffer[0] = '\0';
@@ -743,53 +774,89 @@ void renderEncounterUI() {
 
   ImGui::Spacing();
 
-  // --- Display the Unified Combatant List ---
-  // (This entire section remains unchanged from the previous version)
   if (g_encounterList.empty()) {
     ImGui::Text("No combatants have been added yet.");
   } else {
-    int combatant_to_remove = -1;
-    for (int i = 0; i < g_encounterList.size(); ++i) {
-      ImGui::PushID(i);
+    if (ImGui::BeginTable("EncounterTable", 4, ImGuiTableFlags_Resizable)) {
+      ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("HP", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+      ImGui::TableSetupColumn("Initiative", ImGuiTableColumnFlags_WidthFixed,
+                              100.0f);
+      ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+      ImGui::TableHeadersRow();
 
-      bool is_current_turn = (i == g_currentTurnIndex);
-      if (is_current_turn) {
-        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.9f, 0.6f, 0.0f, 1.0f));
-        ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
+      int combatant_to_remove = -1;
+      for (int i = 0; i < g_encounterList.size(); ++i) {
+        ImGui::PushID(i);
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        bool is_current_turn = (i == g_currentTurnIndex);
+        if (is_current_turn) {
+          ImGui::PushStyleColor(ImGuiCol_Header,
+                              ImVec4(0.9f, 0.6f, 0.0f, 1.0f));
+        }
+        std::string label = g_encounterList[i].displayName + " (" +
+                            std::to_string(g_encounterList[i].initiative) +
+                            ")";
+        if (ImGui::Selectable(label.c_str(), is_current_turn)) {
+          g_currentTurnIndex = i;
+        }
+        if (is_current_turn) {
+          ImGui::PopStyleColor();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (g_encounterList[i].isPlayer) {
+          ImGui::Text("Player");
+        } else {
+          bool is_dead = (g_encounterList[i].currentHitPoints <= 0);
+          if (is_dead) {
+            ImGui::BeginDisabled();
+          }
+          if (ImGui::Button("-")) {
+            g_encounterList[i].currentHitPoints--;
+          }
+          if (is_dead) {
+            ImGui::EndDisabled();
+          }
+
+          ImGui::SameLine();
+          ImGui::Text("%d/%d", g_encounterList[i].currentHitPoints,
+                      g_encounterList[i].maxHitPoints);
+          ImGui::SameLine();
+
+          bool at_max_hp = (g_encounterList[i].currentHitPoints >=
+                            g_encounterList[i].maxHitPoints);
+          if (at_max_hp) {
+            ImGui::BeginDisabled();
+          }
+          if (ImGui::Button("+")) {
+            g_encounterList[i].currentHitPoints++;
+          }
+          if (at_max_hp) {
+            ImGui::EndDisabled();
+          }
+        }
+
+        ImGui::TableSetColumnIndex(2);
+        ImGui::InputInt("##Initiative", &g_encounterList[i].initiative);
+
+        ImGui::TableSetColumnIndex(3);
+        if (ImGui::Button("Remove")) {
+          combatant_to_remove = i;
+        }
+
+        ImGui::PopID();
       }
 
-      std::string label = g_encounterList[i].displayName + " (" +
-                          std::to_string(g_encounterList[i].initiative) + ")";
-      if (ImGui::Selectable(label.c_str(), is_current_turn)) {
-        g_currentTurnIndex = i;
+      if (combatant_to_remove != -1) {
+        if (combatant_to_remove == g_currentTurnIndex) {
+          g_currentTurnIndex = -1;
+        }
+        g_encounterList.erase(g_encounterList.begin() + combatant_to_remove);
       }
-
-      if (is_current_turn) {
-        ImGui::PopStyleColor();
-      }
-
-      ImGui::SameLine(ImGui::GetWindowWidth() - 250);
-
-      ImGui::PushItemWidth(80);
-      ImGui::InputInt("HP", &g_encounterList[i].currentHitPoints, 1, 5,
-                      ImGuiInputTextFlags_CharsDecimal);
-      ImGui::SameLine();
-      ImGui::InputInt("##Initiative", &g_encounterList[i].initiative);
-      ImGui::PopItemWidth();
-      ImGui::SameLine();
-
-      if (ImGui::Button("Remove")) {
-        combatant_to_remove = i;
-      }
-
-      ImGui::PopID();
-    }
-
-    if (combatant_to_remove != -1) {
-      if (combatant_to_remove == g_currentTurnIndex) {
-        g_currentTurnIndex = -1;
-      }
-      g_encounterList.erase(g_encounterList.begin() + combatant_to_remove);
+      ImGui::EndTable();
     }
   }
 
@@ -858,6 +925,45 @@ void renderCombatUI() {
         ImGui::PopID();
       }
     }
+
+    // --- Spell Slot Tracking ---
+    bool is_spellcaster = false;
+    for (const auto &slot : activeCombatant.spellSlots) {
+      if (slot > 0) {
+        is_spellcaster = true;
+        break;
+      }
+    }
+
+    if (is_spellcaster) {
+      ImGui::SeparatorText("Spell Slots");
+      if (ImGui::BeginTable("SpellSlotsTable", 2, ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Level", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Slots", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (int i = 0; i < activeCombatant.spellSlots.size(); ++i) {
+          if (activeCombatant.maxSpellSlots[i] > 0) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("Level %d", i + 1);
+            ImGui::TableSetColumnIndex(1);
+            if (ImGui::InputInt(("##level" + std::to_string(i)).c_str(),
+                               &activeCombatant.spellSlots[i])) {
+              if (activeCombatant.spellSlots[i] < 0) {
+                activeCombatant.spellSlots[i] = 0;
+              } else if (activeCombatant.spellSlots[i] >
+                         activeCombatant.maxSpellSlots[i]) {
+                activeCombatant.spellSlots[i] =
+                    activeCombatant.maxSpellSlots[i];
+              }
+            }
+          }
+        }
+        ImGui::EndTable();
+      }
+    }
+
   } else {
     ImGui::Text("Player characters manage their own abilities.");
   }

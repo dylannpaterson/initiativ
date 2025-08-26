@@ -45,6 +45,8 @@ struct Monster {
   std::vector<std::string> damageResistances;
   std::vector<std::string> damageVulnerabilities;
   std::vector<Ability> abilities;
+  std::vector<int> spellSlots;
+
 
   // A simple function to display the monster's core stats
   void display() const {
@@ -71,8 +73,11 @@ struct Combatant {
   Monster base;            // The creature's core statistics
   std::string displayName; // Unique name for this instance, e.g., "Goblin 3"
   int currentHitPoints;
+  int maxHitPoints;
   int initiative;
   bool isPlayer = false; // A flag to identify the party
+  std::vector<int> spellSlots; // Spell slots for each level (1-9)
+  std::vector<int> maxSpellSlots; // Maximum spell slots for each level (1-9)
 
   // A map to track remaining uses of limited abilities
   // Key: Ability Name, Value: Remaining Uses
@@ -82,8 +87,11 @@ struct Combatant {
   Combatant(const Monster &monster) : base(monster) {
     displayName = base.name;
     currentHitPoints = base.hitPoints;
+    maxHitPoints = base.hitPoints;
     initiative = 0;
     isPlayer = false;
+    spellSlots = base.spellSlots;
+    maxSpellSlots = base.spellSlots;
 
     // --- Corrected Logic: Initialize from direct Ability object data ---
     for (const auto &ability : base.abilities) {
