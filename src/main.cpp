@@ -7,9 +7,9 @@
 #include <cctype>    // For ::tolower
 #include <ctime>     // To seed the winds of chance
 #include <iostream>
-#include <random> // For the casting of lots
+// #include <random> // For the casting of lots
 #include <sstream>
-#include <stdexcept>
+// #include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -35,7 +35,9 @@ static bool g_combatHasBegun = false; // Is the battle joined?
 
 // --- Combat Log ---
 struct LogEntry {
+  enum LogEntryType { DAMAGE, HEALING, EVENT, INFO };
   std::string message;
+  LogEntryType type;
 };
 std::vector<LogEntry> g_combatLog;
 
@@ -47,6 +49,36 @@ void renderCombatLogUI();
 void renderStatBlock(const Monster &monster);
 void initImGui(SDL_Window *window, SDL_GLContext gl_context);
 void shutdownImGui();
+
+// --- Combat Log UI ---
+void renderCombatLogUI() {
+  ImGui::Begin("Combat Log");
+  for (const auto &entry : g_combatLog) {
+    ImVec4 color;
+    switch (entry.type) {
+    case LogEntry::DAMAGE:
+      color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+      break;
+    case LogEntry::HEALING:
+      color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+      break;
+    case LogEntry::EVENT:
+      color = ImVec4(1.0f, 1.0f, 0.4f, 1.0f);
+      break;
+    default:
+      color = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+      break;
+    }
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::TextWrapped("%s", entry.message.c_str());
+    ImGui::PopStyleColor();
+  }
+  // Auto-scroll to the bottom
+  if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
+    ImGui::SetScrollHereY(1.0f);
+  }
+  ImGui::End();
+}
 std::vector<std::string> getMonsterNames(SQLite::Database &db);
 Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName);
 
@@ -110,8 +142,7 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
   Monster monster;
   try {
     // We must first get the MonsterID to query the join tables
-    SQLite::Statement idQuery(db,
-                              "SELECT MonsterID FROM Monsters WHERE Name = ?");
+    SQLite::Statement idQuery(db, "SELECT MonsterID FROM Monsters WHERE Name = ?");
     idQuery.bind(1, monsterName);
     int monsterId = -1;
     if (idQuery.executeStep()) {
@@ -190,7 +221,8 @@ std::vector<std::string> getMonsterSkills(int monsterId, SQLite::Database &db) {
   std::vector<std::string> skills;
   try {
     SQLite::Statement query(
-        db, "SELECT Name, Value FROM Skills INNER JOIN Monster_Skills ON "
+        db,
+        "SELECT Name, Value FROM Skills INNER JOIN Monster_Skills ON "
             "Skills.SkillID = Monster_Skills.SkillID WHERE "
             "Monster_Skills.MonsterID = ?");
     query.bind(1, monsterId);
@@ -352,8 +384,8 @@ int main(int argc, char *argv[]) {
   SDL_WindowFlags window_flags =
       (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
                         SDL_WINDOW_ALLOW_HIGHDPI);
-  SDL_Window *window =
-      SDL_CreateWindow("initiativ - Bestiary", SDL_WINDOWPOS_CENTERED,
+  SDL_Window *window = 
+      SDL_CreateWindow("initiativ - Bestiary", SDL_WINDOWPOS_CENTERED, 
                        SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
   SDL_GLContext gl_context = SDL_GL_CreateContext(window);
   SDL_GL_MakeCurrent(window, gl_context);
@@ -399,6 +431,7 @@ int main(int argc, char *argv[]) {
     if (g_combatHasBegun) {
       renderEncounterUI(); // The roster is always visible
       renderCombatUI();    // The new combat console
+      renderCombatLogUI(); // Display the combat log
     } else {
       renderBestiaryUI(); // Show setup tools
       renderEncounterUI();
@@ -433,9 +466,9 @@ void initImGui(SDL_Window *window, SDL_GLContext gl_context) {
   ImGui::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
   (void)io; // Suppress warning about unused variable
-  io.ConfigFlags |=
+  io.ConfigFlags |= 
       ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-  io.ConfigFlags |=
+  io.ConfigFlags |= 
       ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
 
   // Setup Dear ImGui style
@@ -597,7 +630,7 @@ void renderStatBlock(const Monster &monster) {
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
       for (const auto &ability : monster.abilities) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
-        ImGui::Text("%s: %s", ability.type.c_str(), ability.name.c_str());
+        ImGui::Text("[%s] %s", ability.type.c_str(), ability.name.c_str());
         ImGui::PopStyleColor();
         ImGui::TextWrapped("%s", ability.description.c_str());
         ImGui::Separator();
@@ -686,6 +719,11 @@ void renderBestiaryUI() {
       }
 
       g_encounterList.push_back(newCombatant);
+      {
+        std::stringstream ss;
+        ss << newCombatant.displayName << " has joined the fray!";
+        g_combatLog.push_back({ss.str(), LogEntry::INFO});
+      }
     }
   }
 
@@ -721,6 +759,11 @@ void renderEncounterUI() {
       newPlayer.currentHitPoints = 0; // Not tracked
       newPlayer.maxHitPoints = 0;     // Not tracked
       g_encounterList.push_back(newPlayer);
+      {
+        std::stringstream ss;
+        ss << newPlayer.displayName << " has joined the fray!";
+        g_combatLog.push_back({ss.str(), LogEntry::INFO});
+      }
 
       g_newPlayerNameBuffer[0] = '\0';
       g_newPlayerInitiative = 0;
@@ -732,6 +775,7 @@ void renderEncounterUI() {
   if (!g_encounterList.empty()) {
     if (!g_combatHasBegun) {
       if (ImGui::Button("Begin Combat")) {
+        g_combatLog.push_back({"Combat has begun!", LogEntry::EVENT});
         for (auto &combatant : g_encounterList) {
           if (!combatant.isPlayer) {
             int modifier = calculateModifier(combatant.base.dexterity);
@@ -744,11 +788,17 @@ void renderEncounterUI() {
                   });
         g_currentTurnIndex = 0;
         g_combatHasBegun = true; // Raise the banner!
+        {
+          std::stringstream ss;
+          ss << "It is now " << g_encounterList[g_currentTurnIndex].displayName << "'s turn.";
+          g_combatLog.push_back({ss.str(), LogEntry::EVENT});
+        }
       }
     } else {
       if (ImGui::Button("End Combat")) {
         g_currentTurnIndex = -1;
         g_combatHasBegun = false; // Lower the banner
+        g_combatLog.push_back({"Combat has ended.", LogEntry::EVENT});
       }
     }
 
@@ -757,8 +807,13 @@ void renderEncounterUI() {
       ImGui::SameLine();
       if (ImGui::Button("Next Turn")) {
         if (g_currentTurnIndex != -1) {
-          g_currentTurnIndex =
+          g_currentTurnIndex = 
               (g_currentTurnIndex + 1) % g_encounterList.size();
+          {
+            std::stringstream ss;
+            ss << "It is now " << g_encounterList[g_currentTurnIndex].displayName << "'s turn.";
+            g_combatLog.push_back({ss.str(), LogEntry::EVENT});
+          }
         }
       }
       ImGui::SameLine();
@@ -767,6 +822,11 @@ void renderEncounterUI() {
           g_currentTurnIndex =
               (g_currentTurnIndex - 1 + g_encounterList.size()) %
               g_encounterList.size();
+          {
+            std::stringstream ss;
+            ss << "It is now " << g_encounterList[g_currentTurnIndex].displayName << "'s turn.";
+            g_combatLog.push_back({ss.str(), LogEntry::EVENT});
+          }
         }
       }
     }
@@ -782,7 +842,8 @@ void renderEncounterUI() {
       ImGui::TableSetupColumn("HP", ImGuiTableColumnFlags_WidthFixed, 200.0f);
       ImGui::TableSetupColumn("Initiative", ImGuiTableColumnFlags_WidthFixed,
                               100.0f);
-      ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+      ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed,
+                              100.0f);
       ImGui::TableHeadersRow();
 
       int combatant_to_remove = -1;
@@ -794,11 +855,10 @@ void renderEncounterUI() {
         bool is_current_turn = (i == g_currentTurnIndex);
         if (is_current_turn) {
           ImGui::PushStyleColor(ImGuiCol_Header,
-                              ImVec4(0.9f, 0.6f, 0.0f, 1.0f));
+                                ImVec4(0.9f, 0.6f, 0.0f, 1.0f));
         }
         std::string label = g_encounterList[i].displayName + " (" +
-                            std::to_string(g_encounterList[i].initiative) +
-                            ")";
+                            std::to_string(g_encounterList[i].initiative) + ")";
         if (ImGui::Selectable(label.c_str(), is_current_turn)) {
           g_currentTurnIndex = i;
         }
@@ -816,6 +876,11 @@ void renderEncounterUI() {
           }
           if (ImGui::Button("-")) {
             g_encounterList[i].currentHitPoints--;
+            {
+              std::stringstream ss;
+              ss << g_encounterList[i].displayName << " takes 1 damage.";
+              g_combatLog.push_back({ss.str(), LogEntry::DAMAGE});
+            }
           }
           if (is_dead) {
             ImGui::EndDisabled();
@@ -833,6 +898,11 @@ void renderEncounterUI() {
           }
           if (ImGui::Button("+")) {
             g_encounterList[i].currentHitPoints++;
+            {
+              std::stringstream ss;
+              ss << g_encounterList[i].displayName << " heals 1 damage.";
+              g_combatLog.push_back({ss.str(), LogEntry::HEALING});
+            }
           }
           if (at_max_hp) {
             ImGui::EndDisabled();
@@ -854,6 +924,7 @@ void renderEncounterUI() {
         if (combatant_to_remove == g_currentTurnIndex) {
           g_currentTurnIndex = -1;
         }
+        g_combatLog.push_back({g_encounterList[combatant_to_remove].displayName + " has been removed from combat.", LogEntry::INFO});
         g_encounterList.erase(g_encounterList.begin() + combatant_to_remove);
       }
       ImGui::EndTable();
@@ -894,7 +965,8 @@ void renderCombatUI() {
 
         if (is_limited_by_uses && remaining_uses <= 0) {
           ImGui::PushStyleColor(
-              ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+              ImGuiCol_Text,
+              ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
         }
 
         ImGui::Text("[%s] %s", ability.type.c_str(), ability.name.c_str());
@@ -907,6 +979,11 @@ void renderCombatUI() {
             ImGui::BeginDisabled();
           if (ImGui::Button("Use")) {
             usesMap[ability.name]--;
+            {
+              std::stringstream ss;
+              ss << activeCombatant.displayName << " uses " << ability.name;
+              g_combatLog.push_back({ss.str(), LogEntry::INFO});
+            }
           }
           if (remaining_uses <= 0)
             ImGui::EndDisabled();
@@ -938,7 +1015,8 @@ void renderCombatUI() {
     if (is_spellcaster) {
       ImGui::SeparatorText("Spell Slots");
       if (ImGui::BeginTable("SpellSlotsTable", 2, ImGuiTableFlags_Resizable)) {
-        ImGui::TableSetupColumn("Level", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Level", ImGuiTableColumnFlags_WidthFixed,
+                                100.0f);
         ImGui::TableSetupColumn("Slots", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
@@ -949,7 +1027,7 @@ void renderCombatUI() {
             ImGui::Text("Level %d", i + 1);
             ImGui::TableSetColumnIndex(1);
             if (ImGui::InputInt(("##level" + std::to_string(i)).c_str(),
-                               &activeCombatant.spellSlots[i])) {
+                                &activeCombatant.spellSlots[i])) {
               if (activeCombatant.spellSlots[i] < 0) {
                 activeCombatant.spellSlots[i] = 0;
               } else if (activeCombatant.spellSlots[i] >
@@ -975,7 +1053,8 @@ std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db) {
   try {
     // This query performs a LEFT JOIN to gather usage data where it exists.
     SQLite::Statement query(
-        db, "SELECT A.Name, A.Description, A.AbilityType, "
+        db,
+        "SELECT A.Name, A.Description, A.AbilityType, "
             "AU.UsageType, AU.UsesMax, AU.RechargeValue "
             "FROM Abilities AS A "
             "LEFT JOIN Ability_Usage AS AU ON A.AbilityID = AU.AbilityID "
