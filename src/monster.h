@@ -1,21 +1,19 @@
-#ifndef MONSTER_H
-#define MONSTER_H
-
-#include <iostream>
-#include <map> // Required for tracking ability uses
+#pragma once
+#include <map>
 #include <string>
 #include <vector>
+
+// An enum for clarity and to prevent trivial errors
+enum class ActionType { NONE, ACTION, BONUS_ACTION, REACTION, LEGENDARY, LAIR };
 
 struct Ability {
   std::string name;
   std::string description;
   std::string type;
-
-  // Direct intelligence from the Ability_Usage table
-  int usesMax =
-      0; // From UsesMax column, 0 means not limited by a set number of uses
-  std::string usageType; // "Per Day", "Recharge", etc.
-  int rechargeValue = 0; // e.g., 5 for "Recharge 5-6"
+  std::string usageType;
+  int usesMax = 0;
+  int rechargeValue = 0;
+  ActionType actionType = ActionType::NONE; // The cost of using the ability
 };
 
 struct Monster {
@@ -26,7 +24,6 @@ struct Monster {
   int armorClass;
   int hitPoints;
   std::string hitDice;
-  std::vector<std::string> speeds; // Now a vector to hold all speed types
   int strength;
   int dexterity;
   int constitution;
@@ -34,74 +31,53 @@ struct Monster {
   int wisdom;
   int charisma;
   std::string challengeRating;
-  std::string languages; // The new field for languages
+  std::string languages;
 
-  // New fields for skills, senses, saving throws, and immunities
+  // Using vectors to hold the various details from join tables
+  std::vector<std::string> speeds;
   std::vector<std::string> skills;
-  std::vector<std::string> senses;
   std::vector<std::string> savingThrows;
+  std::vector<std::string> senses;
   std::vector<std::string> conditionImmunities;
   std::vector<std::string> damageImmunities;
   std::vector<std::string> damageResistances;
   std::vector<std::string> damageVulnerabilities;
   std::vector<Ability> abilities;
   std::vector<int> spellSlots;
-
-
-  // A simple function to display the monster's core stats
-  void display() const {
-    std::cout << "Name: " << name << std::endl;
-    std::cout << "Size: " << size << std::endl;
-    std::cout << "Type: " << type << std::endl;
-    std::cout << "Alignment: " << alignment << std::endl;
-    std::cout << "Armor Class: " << armorClass << std::endl;
-    std::cout << "Hit Points: " << hitPoints << " (" << hitDice << ")"
-              << std::endl;
-    std::cout << "Speed: ";
-    for (const auto &speed : speeds) {
-      std::cout << speed << "; ";
-    }
-    std::cout << std::endl;
-    std::cout << "STR: " << strength << " | DEX: " << dexterity
-              << " | CON: " << constitution << " | INT: " << intelligence
-              << " | WIS: " << wisdom << " | CHA: " << charisma << std::endl;
-    std::cout << "Challenge Rating: " << challengeRating << std::endl;
-  }
 };
 
 struct Combatant {
-  Monster base;            // The creature's core statistics
-  std::string displayName; // Unique name for this instance, e.g., "Goblin 3"
-  int currentHitPoints;
-  int maxHitPoints;
-  int initiative;
-  bool isPlayer = false; // A flag to identify the party
-  std::vector<int> spellSlots; // Spell slots for each level (1-9)
-  std::vector<int> maxSpellSlots; // Maximum spell slots for each level (1-9)
+  Monster base; // The creature's core statistics
+  std::string displayName;
+  int initiative = 0;
+  int currentHitPoints = 0;
+  int maxHitPoints = 0;
+  bool isPlayer = false;
 
-  // A map to track remaining uses of limited abilities
-  // Key: Ability Name, Value: Remaining Uses
+  // Tracking for limited-use abilities
   std::map<std::string, int> abilityUses;
 
-  // Constructor to build a Combatant from a Monster
-  Combatant(const Monster &monster) : base(monster) {
-    displayName = base.name;
-    currentHitPoints = base.hitPoints;
-    maxHitPoints = base.hitPoints;
-    initiative = 0;
-    isPlayer = false;
-    spellSlots = base.spellSlots;
-    maxSpellSlots = base.spellSlots;
+  // Spell slot tracking
+  std::vector<int> spellSlots;    // Current slots
+  std::vector<int> maxSpellSlots; // Maximum slots
 
-    // --- Corrected Logic: Initialize from direct Ability object data ---
+  // --- New Strategic Variables ---
+  bool hasUsedAction = false;
+  bool hasUsedBonusAction = false;
+  // bool hasUsedReaction = false; // For future campaigns
+
+  Combatant() = default;
+  explicit Combatant(const Monster &monster)
+      : base(monster), displayName(monster.name),
+        currentHitPoints(monster.hitPoints), maxHitPoints(monster.hitPoints) {
+    // Initialize ability uses from the base monster's abilities
     for (const auto &ability : base.abilities) {
-      // If the database indicates a maximum number of uses, we record it.
       if (ability.usesMax > 0) {
         abilityUses[ability.name] = ability.usesMax;
       }
     }
+    // Initialize spell slots
+    spellSlots = monster.spellSlots;
+    maxSpellSlots = monster.spellSlots;
   }
-  Combatant() = default;
 };
-
-#endif // MONSTER_H

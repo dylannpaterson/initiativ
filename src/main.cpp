@@ -142,7 +142,8 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
   Monster monster;
   try {
     // We must first get the MonsterID to query the join tables
-    SQLite::Statement idQuery(db, "SELECT MonsterID FROM Monsters WHERE Name = ?");
+    SQLite::Statement idQuery(db,
+                              "SELECT MonsterID FROM Monsters WHERE Name = ?");
     idQuery.bind(1, monsterName);
     int monsterId = -1;
     if (idQuery.executeStep()) {
@@ -221,8 +222,7 @@ std::vector<std::string> getMonsterSkills(int monsterId, SQLite::Database &db) {
   std::vector<std::string> skills;
   try {
     SQLite::Statement query(
-        db,
-        "SELECT Name, Value FROM Skills INNER JOIN Monster_Skills ON "
+        db, "SELECT Name, Value FROM Skills INNER JOIN Monster_Skills ON "
             "Skills.SkillID = Monster_Skills.SkillID WHERE "
             "Monster_Skills.MonsterID = ?");
     query.bind(1, monsterId);
@@ -384,8 +384,8 @@ int main(int argc, char *argv[]) {
   SDL_WindowFlags window_flags =
       (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
                         SDL_WINDOW_ALLOW_HIGHDPI);
-  SDL_Window *window = 
-      SDL_CreateWindow("initiativ - Bestiary", SDL_WINDOWPOS_CENTERED, 
+  SDL_Window *window =
+      SDL_CreateWindow("initiativ - Bestiary", SDL_WINDOWPOS_CENTERED,
                        SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
   SDL_GLContext gl_context = SDL_GL_CreateContext(window);
   SDL_GL_MakeCurrent(window, gl_context);
@@ -466,9 +466,9 @@ void initImGui(SDL_Window *window, SDL_GLContext gl_context) {
   ImGui::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
   (void)io; // Suppress warning about unused variable
-  io.ConfigFlags |= 
+  io.ConfigFlags |=
       ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-  io.ConfigFlags |= 
+  io.ConfigFlags |=
       ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
 
   // Setup Dear ImGui style
@@ -790,7 +790,8 @@ void renderEncounterUI() {
         g_combatHasBegun = true; // Raise the banner!
         {
           std::stringstream ss;
-          ss << "It is now " << g_encounterList[g_currentTurnIndex].displayName << "'s turn.";
+          ss << "It is now " << g_encounterList[g_currentTurnIndex].displayName
+             << "'s turn.";
           g_combatLog.push_back({ss.str(), LogEntry::EVENT});
         }
       }
@@ -807,24 +808,33 @@ void renderEncounterUI() {
       ImGui::SameLine();
       if (ImGui::Button("Next Turn")) {
         if (g_currentTurnIndex != -1) {
-          g_currentTurnIndex = 
+          g_currentTurnIndex =
               (g_currentTurnIndex + 1) % g_encounterList.size();
+          // --- Reset Actions for the new turn ---
+          g_encounterList[g_currentTurnIndex].hasUsedAction = false;
+          g_encounterList[g_currentTurnIndex].hasUsedBonusAction = false;
           {
             std::stringstream ss;
-            ss << "It is now " << g_encounterList[g_currentTurnIndex].displayName << "'s turn.";
+            ss << "It is now "
+               << g_encounterList[g_currentTurnIndex].displayName << "'s turn.";
             g_combatLog.push_back({ss.str(), LogEntry::EVENT});
           }
         }
       }
       ImGui::SameLine();
+      // Inside the "Previous Turn" button logic
       if (ImGui::Button("Previous Turn")) {
         if (g_currentTurnIndex != -1) {
           g_currentTurnIndex =
               (g_currentTurnIndex - 1 + g_encounterList.size()) %
               g_encounterList.size();
+          // --- Reset Actions for the new turn ---
+          g_encounterList[g_currentTurnIndex].hasUsedAction = false;
+          g_encounterList[g_currentTurnIndex].hasUsedBonusAction = false;
           {
             std::stringstream ss;
-            ss << "It is now " << g_encounterList[g_currentTurnIndex].displayName << "'s turn.";
+            ss << "It is now "
+               << g_encounterList[g_currentTurnIndex].displayName << "'s turn.";
             g_combatLog.push_back({ss.str(), LogEntry::EVENT});
           }
         }
@@ -924,7 +934,10 @@ void renderEncounterUI() {
         if (combatant_to_remove == g_currentTurnIndex) {
           g_currentTurnIndex = -1;
         }
-        g_combatLog.push_back({g_encounterList[combatant_to_remove].displayName + " has been removed from combat.", LogEntry::INFO});
+        g_combatLog.push_back(
+            {g_encounterList[combatant_to_remove].displayName +
+                 " has been removed from combat.",
+             LogEntry::INFO});
         g_encounterList.erase(g_encounterList.begin() + combatant_to_remove);
       }
       ImGui::EndTable();
@@ -933,7 +946,6 @@ void renderEncounterUI() {
 
   ImGui::End();
 }
-// --- Renders the dedicated UI for an active combat encounter ---
 void renderCombatUI() {
   if (!g_combatHasBegun || g_currentTurnIndex < 0 ||
       g_currentTurnIndex >= g_encounterList.size()) {
@@ -951,6 +963,19 @@ void renderCombatUI() {
   ImGui::PopStyleColor();
   ImGui::Separator();
 
+  // Display available actions for the turn
+  ImGui::Text("Actions Available: ");
+  ImGui::SameLine();
+  if (!activeCombatant.hasUsedAction)
+    ImGui::Text("[Action]");
+  else
+    ImGui::TextDisabled("[Action]");
+  ImGui::SameLine();
+  if (!activeCombatant.hasUsedBonusAction)
+    ImGui::Text("[Bonus Action]");
+  else
+    ImGui::TextDisabled("[Bonus Action]");
+
   if (!activeCombatant.isPlayer) {
     ImGui::SeparatorText("Abilities");
     if (activeCombatant.base.abilities.empty()) {
@@ -960,42 +985,52 @@ void renderCombatUI() {
       for (const auto &ability : activeCombatant.base.abilities) {
         ImGui::PushID(&ability);
 
-        bool is_limited_by_uses = (ability.usesMax > 0);
-        int remaining_uses = is_limited_by_uses ? usesMap[ability.name] : 0;
-
-        if (is_limited_by_uses && remaining_uses <= 0) {
-          ImGui::PushStyleColor(
-              ImGuiCol_Text,
-              ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-        }
+        bool is_usable_action =
+            (ability.actionType == ActionType::ACTION ||
+             ability.actionType == ActionType::BONUS_ACTION);
 
         ImGui::Text("[%s] %s", ability.type.c_str(), ability.name.c_str());
         ImGui::TextWrapped("%s", ability.description.c_str());
 
-        // --- Display usage information ---
-        if (is_limited_by_uses) {
-          ImGui::SameLine();
-          if (remaining_uses <= 0)
+        if (is_usable_action) {
+          bool is_limited_by_uses = (ability.usesMax > 0);
+          int remaining_uses = is_limited_by_uses ? usesMap[ability.name] : 0;
+
+          bool action_already_used =
+              (ability.actionType == ActionType::ACTION &&
+               activeCombatant.hasUsedAction) ||
+              (ability.actionType == ActionType::BONUS_ACTION &&
+               activeCombatant.hasUsedBonusAction);
+
+          // Disable the button if uses are depleted OR the action type is spent
+          if ((is_limited_by_uses && remaining_uses <= 0) ||
+              action_already_used) {
             ImGui::BeginDisabled();
+          }
+
+          ImGui::SameLine();
           if (ImGui::Button("Use")) {
-            usesMap[ability.name]--;
+            if (is_limited_by_uses) {
+              usesMap[ability.name]--;
+            }
+
+            // Mark the action type as used for this turn
+            if (ability.actionType == ActionType::ACTION)
+              activeCombatant.hasUsedAction = true;
+            if (ability.actionType == ActionType::BONUS_ACTION)
+              activeCombatant.hasUsedBonusAction = true;
+
             {
               std::stringstream ss;
               ss << activeCombatant.displayName << " uses " << ability.name;
               g_combatLog.push_back({ss.str(), LogEntry::INFO});
             }
           }
-          if (remaining_uses <= 0)
+
+          if ((is_limited_by_uses && remaining_uses <= 0) ||
+              action_already_used) {
             ImGui::EndDisabled();
-
-          ImGui::Text("Uses remaining: %d/%d", remaining_uses, ability.usesMax);
-        } else if (ability.rechargeValue > 0) {
-          ImGui::Text("Usage: Recharge on a roll of %d-6",
-                      ability.rechargeValue);
-        }
-
-        if (is_limited_by_uses && remaining_uses <= 0) {
-          ImGui::PopStyleColor();
+          }
         }
 
         ImGui::Separator();
@@ -1048,17 +1083,33 @@ void renderCombatUI() {
   ImGui::End();
 }
 
+// A helper to convert strings from the database to our new enum
+ActionType stringToActionType(const std::string &str) {
+  if (str == "Action")
+    return ActionType::ACTION;
+  if (str == "Bonus Action")
+    return ActionType::BONUS_ACTION;
+  if (str == "Reaction")
+    return ActionType::REACTION;
+  if (str == "Legendary")
+    return ActionType::LEGENDARY;
+  if (str == "Lair")
+    return ActionType::LAIR;
+  return ActionType::NONE;
+}
+
 std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db) {
   std::vector<Ability> abilities;
   try {
-    // This query performs a LEFT JOIN to gather usage data where it exists.
     SQLite::Statement query(
         db,
         "SELECT A.Name, A.Description, A.AbilityType, "
-            "AU.UsageType, AU.UsesMax, AU.RechargeValue "
-            "FROM Abilities AS A "
-            "LEFT JOIN Ability_Usage AS AU ON A.AbilityID = AU.AbilityID "
-            "WHERE A.MonsterID = ?");
+        "AU.UsageType, AU.UsesMax, AU.RechargeValue, A.ActionType " // Fetch the
+                                                                    // new
+                                                                    // column
+        "FROM Abilities AS A "
+        "LEFT JOIN Ability_Usage AS AU ON A.AbilityID = AU.AbilityID "
+        "WHERE A.MonsterID = ?");
     query.bind(1, monsterId);
 
     while (query.executeStep()) {
@@ -1067,11 +1118,17 @@ std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db) {
       ability.description = query.getColumn(1).getString();
       ability.type = query.getColumn(2).getString();
 
-      // These columns can be NULL if there's no entry in Ability_Usage
       if (!query.getColumn(3).isNull()) {
         ability.usageType = query.getColumn(3).getString();
         ability.usesMax = query.getColumn(4).getInt();
         ability.rechargeValue = query.getColumn(5).getInt();
+      }
+
+      // Read and set the ActionType
+      if (!query.getColumn(6).isNull()) {
+        ability.actionType = stringToActionType(query.getColumn(6).getString());
+      } else {
+        ability.actionType = ActionType::NONE;
       }
 
       abilities.push_back(ability);

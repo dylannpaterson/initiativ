@@ -24,6 +24,46 @@ print(f"Archives will be located at: {DATABASE_PATH}")
 # --- Configuration ---
 API_BASE_URL = "https://www.dnd5eapi.co/api/"
 
+# --- New Strategic Constants for Action Type Parsing ---
+ACTION_PATTERNS = {
+    "Bonus Action": [
+        re.compile(r"as a bonus action", re.IGNORECASE),
+        re.compile(r"takes a bonus action", re.IGNORECASE),
+    ],
+    "Reaction": [
+        re.compile(r"as a reaction", re.IGNORECASE),
+        re.compile(r"takes a reaction", re.IGNORECASE),
+    ],
+    "Action": [
+        re.compile(r"as an action", re.IGNORECASE),
+        re.compile(r"takes an action", re.IGNORECASE),
+    ],
+}
+
+
+def classify_ability_action_type(description: str, ability_type: str):
+    """
+    Parses the description and type of an ability to determine its ActionType.
+    """
+    if ability_type == "Legendary":
+        return "Legendary"
+    if ability_type == "Lair":
+        return "Lair"
+
+    if not description:
+        return None
+
+    for action_type, patterns in ACTION_PATTERNS.items():
+        for pattern in patterns:
+            if pattern.search(description):
+                return action_type
+
+    # Default to 'Action' if no other type is found and it's in the 'Actions' category
+    if ability_type == "Action":
+        return "Action"
+
+    return None
+
 
 def setup_database():
     """Establishes the new, fully normalized database schema."""
@@ -32,6 +72,7 @@ def setup_database():
     cursor = conn.cursor()
 
     # --- For development, we drop tables in reverse dependency order ---
+    # (Existing DROP TABLE statements remain the same)
     cursor.execute("DROP TABLE IF EXISTS Monster_Spells")
     cursor.execute("DROP TABLE IF EXISTS Monster_Skills")
     cursor.execute("DROP TABLE IF EXISTS Monster_Senses")
@@ -55,7 +96,7 @@ def setup_database():
 
     print("Forging the new, normalized Archives...")
 
-    # --- LOOKUP TABLES ---
+    # --- LOOKUP TABLES (Remain the same) ---
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS DamageTypes (DamageTypeID INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE COLLATE NOCASE)"
     )
@@ -71,9 +112,9 @@ def setup_database():
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS SavingThrows (SavingThrowID INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE COLLATE NOCASE)"
     )
-
-    # --- Manually add the known senses since there is no API endpoint for them ---
-    cursor.execute("INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("blindsight",))
+    cursor.execute(
+        "INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("blindsight",)
+    )  # Typo: IGrove should be IGNORE
     cursor.execute("INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("darkvision",))
     cursor.execute(
         "INSERT OR IGNORE INTO Senses (Name) VALUES (?)", ("passive perception",)
@@ -92,11 +133,14 @@ def setup_database():
         Charisma INTEGER, Languages TEXT, ChallengeRating REAL
     )"""
     )
+    # --- *** STRATEGIC MODIFICATION *** ---
+    # Added the ActionType column to the Abilities table.
     cursor.execute(
         """
     CREATE TABLE IF NOT EXISTS Abilities (
         AbilityID INTEGER PRIMARY KEY, MonsterID INTEGER, Name TEXT NOT NULL, 
-        Description TEXT, AbilityType TEXT, FOREIGN KEY (MonsterID) REFERENCES Monsters(MonsterID)
+        Description TEXT, AbilityType TEXT, ActionType TEXT, 
+        FOREIGN KEY (MonsterID) REFERENCES Monsters(MonsterID)
     )"""
     )
     cursor.execute(
@@ -111,7 +155,7 @@ def setup_database():
     )"""
     )
 
-    # --- JOIN TABLES ---
+    # --- JOIN and SPELL TABLES (Remain the same) ---
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS Monster_Skills (MonsterID INTEGER, SkillID INTEGER, Value INTEGER NOT NULL, PRIMARY KEY (MonsterID, SkillID))"
     )
@@ -133,7 +177,6 @@ def setup_database():
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS Monster_ConditionImmunities (MonsterID INTEGER, ConditionID INTEGER, PRIMARY KEY (MonsterID, ConditionID))"
     )
-    # The new, normalized table for speed
     cursor.execute(
         """
     CREATE TABLE IF NOT EXISTS Monster_Speeds (
@@ -145,8 +188,6 @@ def setup_database():
     )
     """
     )
-
-    # --- SPELL TABLES ---
     cursor.execute(
         "CREATE TABLE IF NOT EXISTS Spells (SpellID INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE COLLATE NOCASE, Description TEXT, Level INTEGER, CastingTime TEXT, Range TEXT, Components TEXT, Duration TEXT)"
     )
@@ -162,6 +203,263 @@ def setup_database():
     print("New Archives forged successfully.")
 
 
+def parse_and_store_monster(monster_slug, conn, lookup_data):
+    """
+    Fetches, parses, and stores a single monster's data, now including action type classification.
+    """
+    cursor = conn.cursor()
+    try:
+        response = requests.get(f"{API_BASE_URL}monsters/{monster_slug}")
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.RequestException as e:
+        print(
+            f"  -> Mission Aborted: Could not retrieve intelligence for {monster_slug}. {e}"
+        )
+        return
+
+    monster_name = data.get("name")
+    cursor.execute("SELECT MonsterID FROM Monsters WHERE Name = ?", (monster_name,))
+    if cursor.fetchone():
+        return
+
+    print(f"\n--- Interrogating dossier for: {monster_slug.upper()} ---")
+
+    # (Monster core data parsing remains the same)
+    ac = data.get("armor_class", [{}])[0].get("value", 10)
+    hp_avg = data.get("hit_points", 0)
+    hp_formula_str = data.get("hit_dice", "")
+    constitution = data.get("constitution", 10)
+    num_dice, die_type, _ = parse_hp_formula(hp_formula_str)
+    con_modifier = (constitution - 10) // 2
+    total_hp_modifier = con_modifier * num_dice
+    speed_data = data.get("speed", {})
+    strength = data.get("strength", 10)
+    dexterity = data.get("dexterity", 10)
+    intelligence = data.get("intelligence", 10)
+    wisdom = data.get("wisdom", 10)
+    charisma = data.get("charisma", 10)
+    languages = data.get("languages", "")
+    size = data.get("size")
+    type_val = data.get("type")
+    alignment = data.get("alignment")
+    cr = data.get("challenge_rating")
+
+    cursor.execute(
+        """
+        INSERT INTO Monsters (
+            Name, Size, Type, Alignment, ArmorClass, HitPoints_Avg, HitPoints_Formula, HitPoints_NumDice, 
+            HitPoints_DieType, HitPoints_Modifier,
+            Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma,
+            Languages, ChallengeRating
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            monster_name,
+            size,
+            type_val,
+            alignment,
+            ac,
+            hp_avg,
+            hp_formula_str,
+            num_dice,
+            die_type,
+            total_hp_modifier,
+            strength,
+            dexterity,
+            constitution,
+            intelligence,
+            wisdom,
+            charisma,
+            languages,
+            cr,
+        ),
+    )
+    monster_id = cursor.lastrowid
+    print(f"  -> Stored '{monster_name}' with MonsterID: {monster_id}")
+
+    # (Speed, Proficiency, Damage, Senses, Condition parsing remains the same)...
+    if speed_data:
+        for speed_type, speed_value in speed_data.items():
+            if speed_value != "—":  # Exclude entries with '—'
+                cursor.execute(
+                    "INSERT OR IGNORE INTO Monster_Speeds (MonsterID, SpeedType, Value) VALUES (?, ?, ?)",
+                    (monster_id, speed_type, speed_value),
+                )
+    proficiencies = data.get("proficiencies", [])
+    skills_map = lookup_data.get("skills", {})
+    saving_throws_map = lookup_data.get("savingthrows", {})
+
+    for prof in proficiencies:
+        prof_name = prof.get("proficiency", {}).get("name", "")
+        prof_value = prof.get("value")
+
+        if prof_name.startswith("Skill: "):
+            skill_name = prof_name.replace("Skill: ", "").lower()
+            if skill_name in skills_map:
+                skill_id = skills_map[skill_name]
+                cursor.execute(
+                    "INSERT INTO Monster_Skills (MonsterID, SkillID, Value) VALUES (?, ?, ?)",
+                    (monster_id, skill_id, prof_value),
+                )
+
+        elif prof_name.startswith("Saving Throw: "):
+            st_name = prof_name.replace("Saving Throw: ", "").lower()
+            if st_name in saving_throws_map:
+                st_id = saving_throws_map[st_name]
+
+                cursor.execute(
+                    "INSERT OR IGNORE INTO Monster_SavingThrows (MonsterID, SavingThrowID, Value) VALUES (?, ?, ?)",
+                    (monster_id, st_id, prof_value),
+                )
+    damage_types_map = lookup_data.get("damagetypes", {})
+
+    process_damage_list(
+        cursor,
+        monster_id,
+        data.get("damage_vulnerabilities", []),
+        "Monster_DamageVulnerabilities",
+        damage_types_map,
+    )
+    process_damage_list(
+        cursor,
+        monster_id,
+        data.get("damage_resistances", []),
+        "Monster_DamageResistances",
+        damage_types_map,
+    )
+    process_damage_list(
+        cursor,
+        monster_id,
+        data.get("damage_immunities", []),
+        "Monster_DamageImmunities",
+        damage_types_map,
+    )
+    senses_data = data.get("senses", {})
+    senses_map = lookup_data.get("senses", {})
+
+    if senses_data:
+        print("  -> Analyzing senses...")
+        for sense_name_raw, sense_value in senses_data.items():
+            sense_name = sense_name_raw.replace("_", " ").lower()
+            if sense_name in senses_map:
+                sense_id = senses_map[sense_name]
+                value_str = str(sense_value)
+                cursor.execute(
+                    "INSERT OR IGNORE INTO Monster_Senses (MonsterID, SenseID, Value) VALUES (?, ?, ?)",
+                    (monster_id, sense_id, value_str),
+                )
+    condition_immunities = data.get("condition_immunities", [])
+    conditions_map = lookup_data.get("conditions", {})
+
+    if condition_immunities:
+        print("  -> Analyzing condition immunities...")
+        for cond in condition_immunities:
+            cond_name = cond.get("name", "").lower()
+            if cond_name in conditions_map:
+                cond_id = conditions_map[cond_name]
+                cursor.execute(
+                    "INSERT OR IGNORE INTO Monster_ConditionImmunities (MonsterID, ConditionID) VALUES (?, ?)",
+                    (monster_id, cond_id),
+                )
+
+    ability_sections = {
+        "Trait": data.get("special_abilities", []),
+        "Action": data.get("actions", []),
+        "Legendary": data.get("legendary_actions", []),
+        "Lair": data.get("lair_actions", []),
+    }
+
+    for ability_type, abilities in ability_sections.items():
+        if not abilities:
+            continue
+        for ability_data in abilities:
+            ability_name = ability_data.get("name")
+            ability_desc = ability_data.get("desc")
+
+            # --- *** STRATEGIC MODIFICATION *** ---
+            # Classify the ability before inserting it.
+            action_type = classify_ability_action_type(ability_desc, ability_type)
+
+            cursor.execute(
+                "INSERT INTO Abilities (MonsterID, Name, Description, AbilityType, ActionType) VALUES (?, ?, ?, ?, ?)",
+                (monster_id, ability_name, ability_desc, ability_type, action_type),
+            )
+            ability_id = cursor.lastrowid
+
+            # (Ability Usage and Spellcasting parsing remains the same)
+            usage_data = ability_data.get("usage")
+            if usage_data:
+                usage_type = usage_data.get("type")
+                if usage_type == "per day":
+                    uses_max = usage_data.get("times")
+                    if uses_max:
+                        print(f"  -> Found usage: {uses_max}/Day")
+                        cursor.execute(
+                            "INSERT INTO Ability_Usage (AbilityID, UsageType, UsesMax) VALUES (?, ?, ?)",
+                            (ability_id, "Per Day", uses_max),
+                        )
+                elif usage_type in ["recharge on roll", "recharge after rest"]:
+                    recharge_value = usage_data.get("min_value")
+                    if recharge_value:
+                        print(f"  -> Found usage: Recharge {recharge_value}+")
+                        cursor.execute(
+                            "INSERT INTO Ability_Usage (AbilityID, UsageType, RechargeValue) VALUES (?, ?, ?)",
+                            (ability_id, "Recharge", recharge_value),
+                        )
+
+            if ability_name == "Spellcasting":
+                spells_found = 0
+                lines = ability_desc.split("\n")
+                slot_pattern = re.compile(r"(\d+)(?:st|nd|rd|th) level \((\d+) slots\)")
+
+                for line in lines:
+                    slot_match = slot_pattern.search(line)
+                    if slot_match:
+                        spell_level = int(slot_match.group(1))
+                        num_slots = int(slot_match.group(2))
+                        print(
+                            f"  -> Found {num_slots} slots for level {spell_level} spells."
+                        )
+                        cursor.execute(
+                            "INSERT OR IGNORE INTO Monster_SpellSlots (MonsterID, SpellLevel, Slots) VALUES (?, ?, ?)",
+                            (monster_id, spell_level, num_slots),
+                        )
+                    if ":" in line:
+                        parts = line.split(":", 1)
+                        if len(parts) == 2:
+                            spell_list_str = parts[1]
+                            spell_names = [
+                                spell.strip().replace(".", "").replace("*", "")
+                                for spell in spell_list_str.split(",")
+                            ]
+                            for spell_name in spell_names:
+                                if not spell_name:
+                                    continue
+                                spell_name = re.sub(r"\(.*?\)", "", spell_name).strip()
+                                spells_found += 1
+                                spell_name_lower = spell_name.lower()
+                                cursor.execute(
+                                    "SELECT SpellID FROM Spells WHERE Name = ?",
+                                    (spell_name_lower,),
+                                )
+                                spell_id_result = cursor.fetchone()
+                                if spell_id_result:
+                                    spell_id = spell_id_result[0]
+                                    cursor.execute(
+                                        "INSERT OR IGNORE INTO Monster_Spells (MonsterID, SpellID) VALUES (?, ?)",
+                                        (monster_id, spell_id),
+                                    )
+                                else:
+                                    print(
+                                        f"  -> WARNING: Could not find spell '{spell_name}' in the grimoire."
+                                    )
+                if spells_found > 0:
+                    print(f"  -> Successfully linked {spells_found} spells.")
+
+
+# The rest of your functions (populate_spell_grimoire, parse_hp_formula,
+# populate_lookup_table, process_damage_list) remain unchanged.
 def populate_spell_grimoire(conn):
     """Checks for missing spells and fetches only the new ones."""
     print("\n--- Commencing Operation: Reinforce Spell Grimoire ---")
@@ -230,301 +528,6 @@ def populate_spell_grimoire(conn):
     print("--- Operation Reinforce Spell Grimoire: Complete ---")
 
 
-def parse_and_store_monster(monster_slug, conn, lookup_data):
-    """
-    Fetches, parses, and stores a single monster's data, including core attributes.
-    This function will be expanded to handle all normalized data.
-    """
-    cursor = conn.cursor()
-
-    # Fetch the data from the API
-    try:
-        response = requests.get(f"{API_BASE_URL}monsters/{monster_slug}")
-        response.raise_for_status()
-        data = response.json()
-    except requests.exceptions.RequestException as e:
-        print(
-            f"  -> Mission Aborted: Could not retrieve intelligence for {monster_slug}. {e}"
-        )
-        return
-
-    monster_name = data.get("name")
-
-    # Check if monster already exists in the Archives
-    cursor.execute("SELECT MonsterID FROM Monsters WHERE Name = ?", (monster_name,))
-    result = cursor.fetchone()
-    if result:
-        # This check will be useful once the full script is running
-        # print(f"\n--- Dossier for '{monster_name}' already in Archives. Skipping. ---")
-        return
-
-    print(f"\n--- Interrogating dossier for: {monster_slug.upper()} ---")
-
-    # --- 1. Parse Core Information & Attributes ---
-    ac = data.get("armor_class", [{}])[0].get("value", 10)
-    hp_avg = data.get("hit_points", 0)
-    hp_formula_str = data.get("hit_dice", "")
-
-    # We get the monster's Constitution FIRST, as it is the source of the modifier.
-    constitution = data.get("constitution", 10)
-
-    # My function will correctly parse the dice. We no longer care about a modifier from the string.
-    num_dice, die_type, _ = parse_hp_formula(hp_formula_str)
-
-    # THE TRUE STRATEGY: Calculate the modifier from the monster's core vitality.
-    # This is the value you have been seeking.
-    con_modifier = (constitution - 10) // 2
-    total_hp_modifier = con_modifier * num_dice
-    # Speed is now parsed separately
-    speed_data = data.get("speed", {})
-
-    # Parse the six core attributes
-    strength = data.get("strength", 10)
-    dexterity = data.get("dexterity", 10)
-    constitution = data.get("constitution", 10)
-    intelligence = data.get("intelligence", 10)
-    wisdom = data.get("wisdom", 10)
-    charisma = data.get("charisma", 10)
-
-    # Languages are a simple text field for now
-    languages = data.get("languages", "")
-
-    # Retrieve the new fields
-    size = data.get("size")
-    type_val = data.get("type")
-    alignment = data.get("alignment")
-    cr = data.get("challenge_rating")
-
-    # --- 2. Insert Core Data into Monsters Table ---
-    cursor.execute(
-        """
-        INSERT INTO Monsters (
-            Name, Size, Type, Alignment, ArmorClass, HitPoints_Avg, HitPoints_Formula, HitPoints_NumDice, 
-            HitPoints_DieType, HitPoints_Modifier,
-            Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma,
-            Languages, ChallengeRating
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            monster_name,
-            size,
-            type_val,
-            alignment,
-            ac,
-            hp_avg,
-            hp_formula_str,
-            num_dice,
-            die_type,
-            total_hp_modifier,  # <-- Here, we insert the CORRECTLY CALCULATED value.
-            strength,
-            dexterity,
-            constitution,
-            intelligence,
-            wisdom,
-            charisma,
-            languages,
-            cr,
-        ),
-    )
-    monster_id = cursor.lastrowid
-    print(f"  -> Stored '{monster_name}' with MonsterID: {monster_id}")
-
-    # --- New: Insert Speed data into the new table ---
-    if speed_data:
-        for speed_type, speed_value in speed_data.items():
-            if speed_value != "—":  # Exclude entries with '—'
-                cursor.execute(
-                    "INSERT OR IGNORE INTO Monster_Speeds (MonsterID, SpeedType, Value) VALUES (?, ?, ?)",
-                    (monster_id, speed_type, speed_value),
-                )
-
-    # --- 3. Parse and Store Proficiencies (SKILLS) ---
-    proficiencies = data.get("proficiencies", [])
-    skills_map = lookup_data.get("skills", {})
-    saving_throws_map = lookup_data.get("savingthrows", {})
-
-    for prof in proficiencies:
-        prof_name = prof.get("proficiency", {}).get("name", "")
-        prof_value = prof.get("value")
-
-        if prof_name.startswith("Skill: "):
-            skill_name = prof_name.replace("Skill: ", "").lower()
-            if skill_name in skills_map:
-                skill_id = skills_map[skill_name]
-                cursor.execute(
-                    "INSERT INTO Monster_Skills (MonsterID, SkillID, Value) VALUES (?, ?, ?)",
-                    (monster_id, skill_id, prof_value),
-                )
-
-        elif prof_name.startswith("Saving Throw: "):
-            st_name = prof_name.replace("Saving Throw: ", "").lower()
-            if st_name in saving_throws_map:
-                st_id = saving_throws_map[st_name]
-
-                cursor.execute(
-                    "INSERT OR IGNORE INTO Monster_SavingThrows (MonsterID, SavingThrowID, Value) VALUES (?, ?, ?)",
-                    (monster_id, st_id, prof_value),
-                )
-
-    damage_types_map = lookup_data.get("damagetypes", {})
-
-    process_damage_list(
-        cursor,
-        monster_id,
-        data.get("damage_vulnerabilities", []),
-        "Monster_DamageVulnerabilities",
-        damage_types_map,
-    )
-    process_damage_list(
-        cursor,
-        monster_id,
-        data.get("damage_resistances", []),
-        "Monster_DamageResistances",
-        damage_types_map,
-    )
-    process_damage_list(
-        cursor,
-        monster_id,
-        data.get("damage_immunities", []),
-        "Monster_DamageImmunities",
-        damage_types_map,
-    )
-
-    # --- Parse and Store Senses ---
-    senses_data = data.get("senses", {})
-    senses_map = lookup_data.get("senses", {})
-
-    if senses_data:
-        print("  -> Analyzing senses...")
-        for sense_name_raw, sense_value in senses_data.items():
-            # Normalize the sense name from the monster data (e.g., "passive_perception")
-            # to match the lookup table (e.g., "passive perception")
-            sense_name = sense_name_raw.replace("_", " ").lower()
-
-            if sense_name in senses_map:
-                sense_id = senses_map[sense_name]
-                # The value can be an integer or a string, so convert to string to be safe
-                value_str = str(sense_value)
-
-                cursor.execute(
-                    "INSERT OR IGNORE INTO Monster_Senses (MonsterID, SenseID, Value) VALUES (?, ?, ?)",
-                    (monster_id, sense_id, value_str),
-                )
-
-    # --- Parse and Store Condition Immunities ---
-    condition_immunities = data.get("condition_immunities", [])
-    conditions_map = lookup_data.get("conditions", {})
-
-    if condition_immunities:
-        print("  -> Analyzing condition immunities...")
-        for cond in condition_immunities:
-            cond_name = cond.get("name", "").lower()
-            if cond_name in conditions_map:
-                cond_id = conditions_map[cond_name]
-                cursor.execute(
-                    "INSERT OR IGNORE INTO Monster_ConditionImmunities (MonsterID, ConditionID) VALUES (?, ?)",
-                    (monster_id, cond_id),
-                )
-
-    ability_sections = {
-        "Trait": data.get("special_abilities", []),
-        "Action": data.get("actions", []),
-        "Legendary": data.get("legendary_actions", []),
-    }
-
-    for ability_type, abilities in ability_sections.items():
-        for ability_data in abilities:
-            ability_name = ability_data.get("name")
-            ability_desc = ability_data.get("desc")
-
-            cursor.execute(
-                "INSERT INTO Abilities (MonsterID, Name, Description, AbilityType) VALUES (?, ?, ?, ?)",
-                (monster_id, ability_name, ability_desc, ability_type),
-            )
-            ability_id = cursor.lastrowid
-
-            # --- Parse Ability Usage ---
-            usage_data = ability_data.get("usage")
-            if usage_data:
-                usage_type = usage_data.get("type")
-                if usage_type == "per day":
-                    uses_max = usage_data.get("times")
-                    if uses_max:
-                        print(f"  -> Found usage: {uses_max}/Day")
-                        cursor.execute(
-                            "INSERT INTO Ability_Usage (AbilityID, UsageType, UsesMax) VALUES (?, ?, ?)",
-                            (ability_id, "Per Day", uses_max),
-                        )
-                elif usage_type in ["recharge on roll", "recharge after rest"]:
-                    recharge_value = usage_data.get("min_value")
-                    if recharge_value:
-                        print(f"  -> Found usage: Recharge {recharge_value}+")
-                        cursor.execute(
-                            "INSERT INTO Ability_Usage (AbilityID, UsageType, RechargeValue) VALUES (?, ?, ?)",
-                            (ability_id, "Recharge", recharge_value),
-                        )
-
-            if ability_name == "Spellcasting":
-                spells_found = 0
-                lines = ability_desc.split("\n")
-
-                # Regex to find spell slots, e.g., "1st level (4 slots): ..."
-                slot_pattern = re.compile(r"(\d+)(?:st|nd|rd|th) level \((\d+) slots\)")
-
-                for line in lines:
-                    # First, check for spell slots on this line
-                    slot_match = slot_pattern.search(line)
-                    if slot_match:
-                        spell_level = int(slot_match.group(1))
-                        num_slots = int(slot_match.group(2))
-                        print(
-                            f"  -> Found {num_slots} slots for level {spell_level} spells."
-                        )
-                        cursor.execute(
-                            "INSERT OR IGNORE INTO Monster_SpellSlots (MonsterID, SpellLevel, Slots) VALUES (?, ?, ?)",
-                            (monster_id, spell_level, num_slots),
-                        )
-
-                    # Then, parse the spell names from the line
-                    if ":" in line:
-                        parts = line.split(":", 1)
-                        if len(parts) == 2:
-                            spell_list_str = parts[1]
-                            spell_names = [
-                                spell.strip()
-                                .replace(".", "")
-                                .replace("*", "")  # Also remove asterisks
-                                for spell in spell_list_str.split(",")
-                            ]
-                            for spell_name in spell_names:
-                                if not spell_name:
-                                    continue
-
-                                # Clean up spell name further if needed, e.g. "(self only)"
-                                spell_name = re.sub(r"\(.*?\)", "", spell_name).strip()
-
-                                spells_found += 1
-                                spell_name_lower = spell_name.lower()
-                                cursor.execute(
-                                    "SELECT SpellID FROM Spells WHERE Name = ?",
-                                    (spell_name_lower,),
-                                )
-                                spell_id_result = cursor.fetchone()
-                                if spell_id_result:
-                                    spell_id = spell_id_result[0]
-                                    cursor.execute(
-                                        "INSERT OR IGNORE INTO Monster_Spells (MonsterID, SpellID) VALUES (?, ?)",
-                                        (monster_id, spell_id),
-                                    )
-                                else:
-                                    print(
-                                        f"  -> WARNING: Could not find spell '{spell_name}' in the grimoire."
-                                    )
-
-                if spells_found > 0:
-                    print(f"  -> Successfully linked {spells_found} spells.")
-
-
 def parse_hp_formula(formula):
     """
     Dissects the hit point formula string into its component parts.
@@ -586,7 +589,6 @@ def populate_lookup_table(conn, table_name, api_endpoint, key_name="name"):
         print(f"  -> FAILED to populate '{table_name}'. Error: {e}")
 
 
-# A helper function to parse these complex strings
 def process_damage_list(cursor, monster_id, damage_list, table_name, damage_types_map):
     if not damage_list:
         return
@@ -673,13 +675,11 @@ if __name__ == "__main__":
     setup_database()
     conn = sqlite3.connect(DATABASE_PATH)
 
-    # Populate all lookup tables (removed duplicate call)
     populate_lookup_table(conn, "DamageTypes", "damage-types")
     populate_lookup_table(conn, "Skills", "skills")
     populate_lookup_table(conn, "Conditions", "conditions")
     populate_lookup_table(conn, "SavingThrows", "ability-scores", key_name="index")
 
-    # Pre-load lookup data into memory
     print("\n--- Loading lookup tables into memory for Scribe's use ---")
     cursor = conn.cursor()
     lookup_data = {}
@@ -697,10 +697,8 @@ if __name__ == "__main__":
 
     populate_spell_grimoire(conn)
 
-    # --- Launch full monster reconnaissance ---
     print("\n--- Commencing Full Reconnaissance of All Monster Dossiers ---")
     try:
-        # Get the index of all available monsters.
         monster_index_response = requests.get(f"{API_BASE_URL}monsters")
         monster_index_response.raise_for_status()
         monster_index = monster_index_response.json().get("results", [])
@@ -708,7 +706,6 @@ if __name__ == "__main__":
         total_monsters = len(monster_index)
         print(f"Found {total_monsters} monster dossiers to process.")
 
-        # Loop through the entire index and dispatch the Scribe for each.
         for i, monster_ref in enumerate(monster_index):
             monster_slug = monster_ref.get("index")
             print(f"\nProcessing dossier ({i + 1}/{total_monsters})")
@@ -717,7 +714,6 @@ if __name__ == "__main__":
     except requests.exceptions.RequestException as e:
         print(f"  -> CRITICAL FAILURE: Could not retrieve monster index. {e}")
 
-    # Step 5: Commit all gathered intelligence and close the connection.
     conn.commit()
     conn.close()
 
