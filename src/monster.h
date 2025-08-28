@@ -16,6 +16,12 @@ struct Ability {
   ActionType actionType = ActionType::NONE; // The cost of using the ability
 };
 
+struct Spell {
+  std::string name;
+  int level;
+  ActionType actionType = ActionType::ACTION; // Default to action
+};
+
 struct Monster {
   std::string name;
   std::string size;
@@ -44,6 +50,7 @@ struct Monster {
   std::vector<std::string> damageVulnerabilities;
   std::vector<Ability> abilities;
   std::vector<int> spellSlots;
+  std::vector<Spell> spells;
 };
 
 struct Combatant {
@@ -76,8 +83,8 @@ struct Combatant {
         abilityUses[ability.name] = ability.usesMax;
       }
     }
-    // Initialize spell slots
-    spellSlots = monster.spellSlots;
-    maxSpellSlots = monster.spellSlots;
+    // Initialize spell slots from the base monster's template
+    spellSlots = base.spellSlots;
+    maxSpellSlots = base.spellSlots;
   }
 };

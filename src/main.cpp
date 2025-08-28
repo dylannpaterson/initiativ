@@ -49,6 +49,7 @@ void renderCombatLogUI();
 void renderStatBlock(const Monster &monster);
 void initImGui(SDL_Window *window, SDL_GLContext gl_context);
 void shutdownImGui();
+ActionType stringToActionType(const std::string &str);
 
 // --- Combat Log UI ---
 void renderCombatLogUI() {
@@ -100,6 +101,7 @@ getMonsterAbilities(int monsterId,
                     SQLite::Database &db); // Corrected declaration
 std::vector<std::string> getMonsterSpeeds(int monsterId, SQLite::Database &db);
 std::vector<int> getMonsterSpellSlots(int monsterId, SQLite::Database &db);
+std::vector<Spell> getMonsterSpells(int monsterId, SQLite::Database &db);
 
 // Function to fetch all monster names from the database
 std::vector<std::string> getMonsterNames(SQLite::Database &db) {
@@ -135,6 +137,27 @@ std::vector<int> getMonsterSpellSlots(int monsterId, SQLite::Database &db) {
               << std::endl;
   }
   return spellSlots;
+}
+
+std::vector<Spell> getMonsterSpells(int monsterId, SQLite::Database &db) {
+  std::vector<Spell> spells;
+  try {
+    SQLite::Statement query(
+        db, "SELECT S.Name, S.Level, S.CastingTime FROM Spells AS S "
+            "INNER JOIN Monster_Spells AS MS ON S.SpellID = MS.SpellID "
+            "WHERE MS.MonsterID = ? ORDER BY S.Level, S.Name");
+    query.bind(1, monsterId);
+    while (query.executeStep()) {
+      Spell spell;
+      spell.name = query.getColumn(0).getString();
+      spell.level = query.getColumn(1).getInt();
+      spell.actionType = stringToActionType(query.getColumn(2).getString());
+      spells.push_back(spell);
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "SQLite error in getMonsterSpells: " << e.what() << std::endl;
+  }
+  return spells;
 }
 
 // Function to fetch a single monster's details by name
@@ -192,6 +215,7 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
         getMonsterDamageVulnerabilities(monsterId, db);
     monster.abilities = getMonsterAbilities(monsterId, db);
     monster.spellSlots = getMonsterSpellSlots(monsterId, db);
+    monster.spells = getMonsterSpells(monsterId, db);
 
   } catch (const std::exception &e) {
     std::cerr << "SQLite error in getMonsterByName: " << e.what() << std::endl;
@@ -1038,6 +1062,51 @@ void renderCombatUI() {
       }
     }
 
+    // --- Spellcasting Section ---
+    if (!activeCombatant.base.spells.empty()) {
+      ImGui::SeparatorText("Spells");
+      for (const auto &spell : activeCombatant.base.spells) {
+        ImGui::PushID(&spell);
+
+        bool has_slots = (spell.level == 0) ||
+                         (activeCombatant.spellSlots[spell.level - 1] > 0);
+        bool action_available = (spell.actionType == ActionType::ACTION &&
+                                 !activeCombatant.hasUsedAction) ||
+                                (spell.actionType == ActionType::BONUS_ACTION &&
+                                 !activeCombatant.hasUsedBonusAction);
+
+        if (!has_slots || !action_available) {
+          ImGui::BeginDisabled();
+        }
+
+        ImGui::Text("Lvl %d: %s", spell.level, spell.name.c_str());
+        ImGui::SameLine();
+        if (ImGui::Button("Cast")) {
+          if (spell.level > 0) {
+            activeCombatant.spellSlots[spell.level - 1]--;
+          }
+
+          if (spell.actionType == ActionType::ACTION) {
+            activeCombatant.hasUsedAction = true;
+          } else if (spell.actionType == ActionType::BONUS_ACTION) {
+            activeCombatant.hasUsedBonusAction = true;
+          }
+
+          {
+            std::stringstream ss;
+            ss << activeCombatant.displayName << " casts " << spell.name;
+            g_combatLog.push_back({ss.str(), LogEntry::INFO});
+          }
+        }
+
+        if (!has_slots || !action_available) {
+          ImGui::EndDisabled();
+        }
+
+        ImGui::PopID();
+      }
+    }
+
     // --- Spell Slot Tracking ---
     bool is_spellcaster = false;
     for (const auto &slot : activeCombatant.spellSlots) {
@@ -1085,15 +1154,19 @@ void renderCombatUI() {
 
 // A helper to convert strings from the database to our new enum
 ActionType stringToActionType(const std::string &str) {
-  if (str == "Action")
+  std::string lower_str = str;
+  std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+
+  if (lower_str == "action")
     return ActionType::ACTION;
-  if (str == "Bonus Action")
+  if (lower_str == "bonus action")
     return ActionType::BONUS_ACTION;
-  if (str == "Reaction")
+  if (lower_str == "reaction")
     return ActionType::REACTION;
-  if (str == "Legendary")
+  if (lower_str == "legendary")
     return ActionType::LEGENDARY;
-  if (str == "Lair")
+  if (lower_str == "lair")
     return ActionType::LAIR;
   return ActionType::NONE;
 }
