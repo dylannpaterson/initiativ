@@ -214,7 +214,6 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
     monster.damageVulnerabilities =
         getMonsterDamageVulnerabilities(monsterId, db);
     monster.abilities = getMonsterAbilities(monsterId, db);
-    monster.spellSlots = getMonsterSpellSlots(monsterId, db);
     monster.spells = getMonsterSpells(monsterId, db);
 
   } catch (const std::exception &e) {
@@ -730,6 +729,21 @@ void renderBestiaryUI() {
       // Create a new combatant from the selected monster
       Combatant newCombatant(g_currentMonster);
 
+// --- The Decisive Action ---
+// Manually fetch and assign spell slots to eradicate all ambiguity.
+try {
+    SQLite::Statement idQuery(*g_db, "SELECT MonsterID FROM Monsters WHERE Name = ?");
+    idQuery.bind(1, g_currentMonster.name);
+    if (idQuery.executeStep()) {
+        int monsterId = idQuery.getColumn(0).getInt();
+        newCombatant.spellSlots = getMonsterSpellSlots(monsterId, *g_db);
+        newCombatant.maxSpellSlots = newCombatant.spellSlots;
+    }
+} catch (const std::exception& e) {
+    std::cerr << "Failed to get monster ID for spell slot assignment: " << e.what() << std::endl;
+}
+// --- End Decisive Action ---
+
       // Strategically assign a unique name (e.g., Orc 1, Orc 2)
       int count = 0;
       for (const auto &combatant : g_encounterList) {
@@ -811,6 +825,11 @@ void renderEncounterUI() {
                     return a.initiative > b.initiative;
                   });
         g_currentTurnIndex = 0;
+        if (g_currentTurnIndex >= 0 &&
+            g_currentTurnIndex < g_encounterList.size()) {
+          g_encounterList[g_currentTurnIndex].hasUsedAction = false;
+          g_encounterList[g_currentTurnIndex].hasUsedBonusAction = false;
+        }
         g_combatHasBegun = true; // Raise the banner!
         {
           std::stringstream ss;
@@ -1007,6 +1026,9 @@ void renderCombatUI() {
     } else {
       auto &usesMap = activeCombatant.abilityUses;
       for (const auto &ability : activeCombatant.base.abilities) {
+        if (ability.name == "Spellcasting") {
+          continue;
+        }
         ImGui::PushID(&ability);
 
         bool is_usable_action =
@@ -1070,6 +1092,7 @@ void renderCombatUI() {
 
         bool has_slots = (spell.level == 0) ||
                          (activeCombatant.spellSlots[spell.level - 1] > 0);
+        ImGui::Text("DEBUG: Spell Level: %d, spellSlots.size(): %zu, Slots for this level: %d", spell.level, activeCombatant.spellSlots.size(), (spell.level > 0 && (size_t)(spell.level - 1) < activeCombatant.spellSlots.size()) ? activeCombatant.spellSlots[spell.level - 1] : -1);
         bool action_available = (spell.actionType == ActionType::ACTION &&
                                  !activeCombatant.hasUsedAction) ||
                                 (spell.actionType == ActionType::BONUS_ACTION &&

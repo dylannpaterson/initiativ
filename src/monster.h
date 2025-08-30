@@ -49,7 +49,6 @@ struct Monster {
   std::vector<std::string> damageResistances;
   std::vector<std::string> damageVulnerabilities;
   std::vector<Ability> abilities;
-  std::vector<int> spellSlots;
   std::vector<Spell> spells;
 };
 
@@ -83,8 +82,6 @@ struct Combatant {
         abilityUses[ability.name] = ability.usesMax;
       }
     }
-    // Initialize spell slots from the base monster's template
-    spellSlots = base.spellSlots;
-    maxSpellSlots = base.spellSlots;
+    
   }
 };
