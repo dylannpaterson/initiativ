@@ -138,10 +138,21 @@ def setup_database():
     cursor.execute(
         """
     CREATE TABLE IF NOT EXISTS Abilities (
-        AbilityID INTEGER PRIMARY KEY, MonsterID INTEGER, Name TEXT NOT NULL, 
-        Description TEXT, AbilityType TEXT, ActionType TEXT, 
-        FOREIGN KEY (MonsterID) REFERENCES Monsters(MonsterID)
-    )"""
+    AbilityID INTEGER PRIMARY KEY,
+    MonsterID INTEGER,
+    Name TEXT NOT NULL,
+    Description TEXT,
+    AbilityType TEXT,
+    ActionType TEXT,
+    TargetType TEXT,
+    AttackRollType TEXT,
+    SavingThrowType TEXT,
+    SavingThrowDC INTEGER,
+    DamageDice TEXT,
+    DamageType TEXT,
+    DamageModifierAbility TEXT,
+    FOREIGN KEY (MonsterID) REFERENCES Monsters(MonsterID)
+)"""
     )
     cursor.execute(
         """

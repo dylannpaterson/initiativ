@@ -14,12 +14,26 @@ struct Ability {
   int usesMax = 0;
   int rechargeValue = 0;
   ActionType actionType = ActionType::NONE; // The cost of using the ability
+  std::string targetType;         // New
+  std::string attackRollType;     // New
+  std::string savingThrowType;    // New
+  int savingThrowDC = 0;          // New
+  std::string damageDice;         // New
+  std::string damageType;         // New
+  std::string damageModifierAbility; // New
 };
 
 struct Spell {
   std::string name;
   int level;
-  ActionType actionType = ActionType::ACTION; // Default to action
+  ActionType actionType = ActionType::NONE; // Changed default to NONE, as it's explicitly set from DB
+  std::string targetType;         // New
+  std::string attackRollType;     // New
+  std::string savingThrowType;    // New
+  int savingThrowDC = 0;          // New
+  std::string damageDice;         // New
+  std::string damageType;         // New
+  std::string damageModifierAbility; // New
 };
 
 struct Monster {
