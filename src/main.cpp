@@ -498,8 +498,7 @@ void initImGui(SDL_Window *window, SDL_GLContext gl_context) {
   ImGui::StyleColorsDark();
 
   // Load a font to improve readability
-  io.Fonts->AddFontFromFileTTF("../data/fonts/static/Roboto-Regular.ttf",
-                               36.0f);
+  io.Fonts->AddFontFromFileTTF("../data/fonts/FiraSans-Regular.ttf", 36.0f);
 
   // Setup Platform/Renderer backends
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
@@ -729,20 +728,22 @@ void renderBestiaryUI() {
       // Create a new combatant from the selected monster
       Combatant newCombatant(g_currentMonster);
 
-// --- The Decisive Action ---
-// Manually fetch and assign spell slots to eradicate all ambiguity.
-try {
-    SQLite::Statement idQuery(*g_db, "SELECT MonsterID FROM Monsters WHERE Name = ?");
-    idQuery.bind(1, g_currentMonster.name);
-    if (idQuery.executeStep()) {
-        int monsterId = idQuery.getColumn(0).getInt();
-        newCombatant.spellSlots = getMonsterSpellSlots(monsterId, *g_db);
-        newCombatant.maxSpellSlots = newCombatant.spellSlots;
-    }
-} catch (const std::exception& e) {
-    std::cerr << "Failed to get monster ID for spell slot assignment: " << e.what() << std::endl;
-}
-// --- End Decisive Action ---
+      // --- The Decisive Action ---
+      // Manually fetch and assign spell slots to eradicate all ambiguity.
+      try {
+        SQLite::Statement idQuery(
+            *g_db, "SELECT MonsterID FROM Monsters WHERE Name = ?");
+        idQuery.bind(1, g_currentMonster.name);
+        if (idQuery.executeStep()) {
+          int monsterId = idQuery.getColumn(0).getInt();
+          newCombatant.spellSlots = getMonsterSpellSlots(monsterId, *g_db);
+          newCombatant.maxSpellSlots = newCombatant.spellSlots;
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "Failed to get monster ID for spell slot assignment: "
+                  << e.what() << std::endl;
+      }
+      // --- End Decisive Action ---
 
       // Strategically assign a unique name (e.g., Orc 1, Orc 2)
       int count = 0;
@@ -829,6 +830,9 @@ void renderEncounterUI() {
             g_currentTurnIndex < g_encounterList.size()) {
           g_encounterList[g_currentTurnIndex].hasUsedAction = false;
           g_encounterList[g_currentTurnIndex].hasUsedBonusAction = false;
+          std::cout << "BEGIN COMBAT: Resetting actions for "
+                    << g_encounterList[g_currentTurnIndex].displayName
+                    << std::endl;
         }
         g_combatHasBegun = true; // Raise the banner!
         {
@@ -856,6 +860,9 @@ void renderEncounterUI() {
           // --- Reset Actions for the new turn ---
           g_encounterList[g_currentTurnIndex].hasUsedAction = false;
           g_encounterList[g_currentTurnIndex].hasUsedBonusAction = false;
+          std::cout << "NEXT TURN: Resetting actions for "
+                    << g_encounterList[g_currentTurnIndex].displayName
+                    << std::endl;
           {
             std::stringstream ss;
             ss << "It is now "
@@ -1092,11 +1099,11 @@ void renderCombatUI() {
 
         bool has_slots = (spell.level == 0) ||
                          (activeCombatant.spellSlots[spell.level - 1] > 0);
-        ImGui::Text("DEBUG: Spell Level: %d, spellSlots.size(): %zu, Slots for this level: %d", spell.level, activeCombatant.spellSlots.size(), (spell.level > 0 && (size_t)(spell.level - 1) < activeCombatant.spellSlots.size()) ? activeCombatant.spellSlots[spell.level - 1] : -1);
-        bool action_available = (spell.actionType == ActionType::ACTION &&
-                                 !activeCombatant.hasUsedAction) ||
-                                (spell.actionType == ActionType::BONUS_ACTION &&
-                                 !activeCombatant.hasUsedBonusAction);
+        bool action_available =
+            (spell.actionType == ActionType::ACTION &&
+             !activeCombatant.hasUsedAction) ||
+            (spell.actionType == ActionType::BONUS_ACTION &&
+             !activeCombatant.hasUsedBonusAction);
 
         if (!has_slots || !action_available) {
           ImGui::BeginDisabled();
@@ -1181,16 +1188,29 @@ ActionType stringToActionType(const std::string &str) {
   std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(),
                  [](unsigned char c) { return std::tolower(c); });
 
-  if (lower_str == "action")
-    return ActionType::ACTION;
-  if (lower_str == "bonus action")
+  std::cerr << "DEBUG: stringToActionType received: '" << str << "' (lowercased: '" << lower_str << "')" << std::endl;
+
+  if (lower_str.find("bonus action") != std::string::npos) {
+    std::cerr << "DEBUG: Matched bonus action" << std::endl;
     return ActionType::BONUS_ACTION;
-  if (lower_str == "reaction")
+  }
+  if (lower_str.find("action") != std::string::npos) {
+    std::cerr << "DEBUG: Matched action" << std::endl;
+    return ActionType::ACTION;
+  }
+  if (lower_str.find("reaction") != std::string::npos) {
+    std::cerr << "DEBUG: Matched reaction" << std::endl;
     return ActionType::REACTION;
-  if (lower_str == "legendary")
+  }
+  if (lower_str.find("legendary") != std::string::npos) {
+    std::cerr << "DEBUG: Matched legendary" << std::endl;
     return ActionType::LEGENDARY;
-  if (lower_str == "lair")
+  }
+  if (lower_str.find("lair") != std::string::npos) {
+    std::cerr << "DEBUG: Matched lair" << std::endl;
     return ActionType::LAIR;
+  }
+  std::cerr << "DEBUG: No match, returning NONE" << std::endl;
   return ActionType::NONE;
 }
 
