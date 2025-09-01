@@ -25,6 +25,7 @@ struct Ability {
 
 struct Spell {
   std::string name;
+  std::string description; // New
   int level;
   ActionType actionType = ActionType::NONE; // Changed default to NONE, as it's explicitly set from DB
   std::string targetType;         // New
@@ -84,6 +85,7 @@ struct Combatant {
   // --- New Strategic Variables ---
   bool hasUsedAction = false;
   bool hasUsedBonusAction = false;
+  std::vector<std::string> activeConditions; // New: Track active conditions
   // bool hasUsedReaction = false; // For future campaigns
 
   Combatant() = default;
