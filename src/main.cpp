@@ -954,6 +954,22 @@ void renderEncounterUI() {
       ImGui::SameLine();
       if (ImGui::Button("Next Turn")) {
         if (g_currentTurnIndex != -1) {
+          // Decrement condition durations and remove expired conditions
+          for (auto &combatant : g_encounterList) {
+            // Create a new vector to hold conditions that are still active
+            std::vector<std::pair<std::string, int>> remainingConditions;
+            for (const auto &condition : combatant.activeConditions) {
+              if (condition.second > 1) { // If duration is more than 1, decrement
+                remainingConditions.push_back({condition.first, condition.second - 1});
+              } else { // Duration is 1, so it expires
+                std::stringstream ss;
+                ss << combatant.displayName << " is no longer " << condition.first << ".";
+                g_combatLog.push_back({ss.str(), LogEntry::EVENT});
+              }
+            }
+            combatant.activeConditions = remainingConditions; // Update active conditions
+          }
+
           g_currentTurnIndex =
               (g_currentTurnIndex + 1) % g_encounterList.size();
           // --- Reset Actions for the new turn ---
@@ -996,11 +1012,12 @@ void renderEncounterUI() {
   if (g_encounterList.empty()) {
     ImGui::Text("No combatants have been added yet.");
   } else {
-    if (ImGui::BeginTable("EncounterTable", 4, ImGuiTableFlags_Resizable)) {
+    if (ImGui::BeginTable("EncounterTable", 5, ImGuiTableFlags_Resizable)) { // Increased column count to 5
       ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
       ImGui::TableSetupColumn("HP", ImGuiTableColumnFlags_WidthFixed, 200.0f);
       ImGui::TableSetupColumn("Initiative", ImGuiTableColumnFlags_WidthFixed,
                               100.0f);
+      ImGui::TableSetupColumn("Conditions", ImGuiTableColumnFlags_WidthStretch); // New column for conditions
       ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed,
                               100.0f);
       ImGui::TableHeadersRow();
@@ -1071,7 +1088,16 @@ void renderEncounterUI() {
         ImGui::TableSetColumnIndex(2);
         ImGui::InputInt("##Initiative", &g_encounterList[i].initiative);
 
-        ImGui::TableSetColumnIndex(3);
+        ImGui::TableSetColumnIndex(3); // New column for conditions
+        if (!g_encounterList[i].activeConditions.empty()) {
+          for (const auto &condition : g_encounterList[i].activeConditions) {
+            ImGui::TextWrapped("- %s (%d turns)", condition.first.c_str(), condition.second);
+          }
+        } else {
+          ImGui::Text("None");
+        }
+
+        ImGui::TableSetColumnIndex(4); // Shifted from 3 to 4
         if (ImGui::Button("Remove")) {
           combatant_to_remove = i;
         }
@@ -1434,7 +1460,7 @@ void resolveAction(TargetingState &targetingState) {
       }
 
       // Condition Application (after damage/healing)
-      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^\]]+)\])");
+      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
       std::smatch condition_matches;
       if (std::regex_search(ability.description, condition_matches, condition_pattern)) {
         std::string condition_name = condition_matches[1].str();
@@ -1556,7 +1582,7 @@ void resolveAction(TargetingState &targetingState) {
       }
 
       // Condition Application (after damage/healing)
-      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^\]]+)\])");
+      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
       std::smatch condition_matches;
       if (std::regex_search(spell.description, condition_matches, condition_pattern)) {
         std::string condition_name = condition_matches[1].str();
@@ -1678,6 +1704,7 @@ void renderPlayerSaveUI() {
     description_ptr = &g_playerSaveState.spell->description;
   }
 
+  // The prompt is displayed by ImGui::Text, no need to log it.
   ImGui::Text("%s must make a %s saving throw vs DC %d for %s.",
               target.displayName.c_str(), g_playerSaveState.saveType.c_str(),
               g_playerSaveState.saveDC, actionName);
@@ -1740,7 +1767,7 @@ void renderPlayerSaveUI() {
 
     // Condition Application (after damage/healing)
     if (description_ptr) {
-      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^\]]+)\])");
+      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
       std::smatch condition_matches;
       if (std::regex_search(*description_ptr, condition_matches, condition_pattern)) {
         std::string condition_name = condition_matches[1].str();
@@ -1808,7 +1835,7 @@ void renderPlayerSaveUI() {
 
     // Condition Application (after damage/healing)
     if (description_ptr) {
-      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^\]]+)\])");
+      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
       std::smatch condition_matches;
       if (std::regex_search(*description_ptr, condition_matches, condition_pattern)) {
         std::string condition_name = condition_matches[1].str();

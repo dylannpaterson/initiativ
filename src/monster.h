@@ -85,7 +85,7 @@ struct Combatant {
   // --- New Strategic Variables ---
   bool hasUsedAction = false;
   bool hasUsedBonusAction = false;
-  std::vector<std::string> activeConditions; // New: Track active conditions
+  std::vector<std::pair<std::string, int>> activeConditions; // New: Track active conditions (name, duration)
   // bool hasUsedReaction = false; // For future campaigns
 
   Combatant() = default;
