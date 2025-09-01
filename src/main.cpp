@@ -1464,8 +1464,12 @@ void resolveAction(TargetingState &targetingState) {
       std::smatch condition_matches;
       if (std::regex_search(ability.description, condition_matches, condition_pattern)) {
         std::string condition_name = condition_matches[1].str();
-        target.activeConditions.push_back(condition_name);
-        log_ss << target.displayName << " is now " << condition_name << ". ";
+        int duration = 1; // Default duration
+        if (condition_matches[2].matched) {
+            duration = std::stoi(condition_matches[2].str());
+        }
+        target.activeConditions.push_back({condition_name, duration});
+        log_ss << target.displayName << " is now " << condition_name << " for " << duration << " turns. ";
         g_combatLog.push_back({log_ss.str(), LogEntry::EVENT});
         log_ss.str("");
       }
@@ -1586,8 +1590,12 @@ void resolveAction(TargetingState &targetingState) {
       std::smatch condition_matches;
       if (std::regex_search(spell.description, condition_matches, condition_pattern)) {
         std::string condition_name = condition_matches[1].str();
-        target.activeConditions.push_back(condition_name);
-        log_ss << target.displayName << " is now " << condition_name << ". ";
+        int duration = 1; // Default duration
+        if (condition_matches[2].matched) {
+            duration = std::stoi(condition_matches[2].str());
+        }
+        target.activeConditions.push_back({condition_name, duration});
+        log_ss << target.displayName << " is now " << condition_name << " for " << duration << " turns. ";
         g_combatLog.push_back({log_ss.str(), LogEntry::EVENT});
         log_ss.str("");
       }
@@ -1765,16 +1773,54 @@ void renderPlayerSaveUI() {
       g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
     }
 
+    if (damage_type == "healing") {
+        target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + total_damage);
+        log_ss << target.displayName << " successfully saves against " << actionName << ", healing for " << total_damage << " hit points (half effect). ";
+        g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
+      } else {
+        target.currentHitPoints -= total_damage;
+        log_ss << target.displayName << " resists the " << actionName << ", taking only " << total_damage << " " << damage_type << " damage instead of the full " << full_damage_value << ". ";
+        g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
+      }
+    } else if (g_playerSaveState.spell && !g_playerSaveState.spell->damageDice.empty()) {
+      int damage_roll = rollDice(g_playerSaveState.spell->damageDice);
+      int damage_modifier = 0;
+      if (!g_playerSaveState.spell->damageModifierAbility.empty()) {
+        int caster_ability_score = getAbilityScore(
+            g_encounterList[g_currentTurnIndex],
+            g_playerSaveState.spell->damageModifierAbility);
+        damage_modifier = calculateModifier(caster_ability_score);
+      }
+      full_damage_value = damage_roll + damage_modifier;
+      total_damage = full_damage_value / 2;
+      damage_type = g_playerSaveState.spell->damageType;
+
+      if (damage_type == "healing") {
+        target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + total_damage);
+        log_ss << target.displayName << " successfully saves against " << actionName << ", healing for " << total_damage << " hit points (half effect). ";
+        g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
+      } else {
+        target.currentHitPoints -= total_damage;
+        log_ss << target.displayName << " resists the " << actionName << ", taking only " << total_damage << " " << damage_type << " damage instead of the full " << full_damage_value << ". ";
+        g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
+      }
+    } else {
+      log_ss << target.displayName << " successfully saves against " << actionName << ". ";
+      g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
+    }
+
     // Condition Application (after damage/healing)
     if (description_ptr) {
       std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
       std::smatch condition_matches;
       if (std::regex_search(*description_ptr, condition_matches, condition_pattern)) {
         std::string condition_name = condition_matches[1].str();
-        target.activeConditions.push_back(condition_name);
-        log_ss.str(""); // Clear previous log
-        log_ss << target.displayName << " is now " << condition_name << " (due to successful save). ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::EVENT});
+        int duration = 1; // Default duration
+        if (condition_matches[2].matched) {
+            duration = std::stoi(condition_matches[2].str());
+        }
+        target.activeConditions.push_back({condition_name, duration});
+        // No log here, as per user's request for concise logging.
       }
     }
 
@@ -1839,10 +1885,12 @@ void renderPlayerSaveUI() {
       std::smatch condition_matches;
       if (std::regex_search(*description_ptr, condition_matches, condition_pattern)) {
         std::string condition_name = condition_matches[1].str();
-        target.activeConditions.push_back(condition_name);
-        log_ss.str(""); // Clear previous log
-        log_ss << target.displayName << " is now " << condition_name << ". ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::EVENT});
+        int duration = 1; // Default duration
+        if (condition_matches[2].matched) {
+            duration = std::stoi(condition_matches[2].str());
+        }
+        target.activeConditions.push_back({condition_name, duration});
+        // No log here, as per user's request for concise logging.
       }
     }
 
