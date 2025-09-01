@@ -7,9 +7,7 @@
 #include <cctype>    // For ::tolower
 #include <iostream>
 #include <random> // For the casting of lots
-// #include <random> // For the casting of lots
 #include <sstream>
-// #include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -168,7 +166,10 @@ std::vector<Spell> getMonsterSpells(int monsterId, SQLite::Database &db) {
   std::vector<Spell> spells;
   try {
     SQLite::Statement query(
-        db, "SELECT S.Name, S.Level, S.CastingTime, S.Description FROM Spells AS S " // Added S.Description
+        db, "SELECT S.Name, S.Level, S.CastingTime, S.Description, "
+            "S.SavingThrowType, S.SavingThrowDC, S.DamageDice, S.DamageType, "
+            "S.DamageModifierAbility "
+            "FROM Spells AS S "
             "INNER JOIN Monster_Spells AS MS ON S.SpellID = MS.SpellID "
             "WHERE MS.MonsterID = ? ORDER BY S.Level, S.Name");
     query.bind(1, monsterId);
@@ -177,7 +178,14 @@ std::vector<Spell> getMonsterSpells(int monsterId, SQLite::Database &db) {
       spell.name = query.getColumn(0).getString();
       spell.level = query.getColumn(1).getInt();
       spell.actionType = stringToActionType(query.getColumn(2).getString());
-      spell.description = query.getColumn(3).getString(); // Assign description
+      spell.description = query.getColumn(3).getString();
+      // --- The Crucial Intelligence ---
+      spell.savingThrowType = query.getColumn(4).getString();
+      spell.savingThrowDC = query.getColumn(5).getInt();
+      spell.damageDice = query.getColumn(6).getString();
+      spell.damageType = query.getColumn(7).getString();
+      spell.damageModifierAbility = query.getColumn(8).getString();
+      // --- End ---
       spells.push_back(spell);
     }
   } catch (const std::exception &e) {
@@ -191,7 +199,8 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
   Monster monster;
   try {
     // We must first get the MonsterID to query the join tables
-    SQLite::Statement idQuery(db, "SELECT MonsterID FROM Monsters WHERE Name = ?");
+    SQLite::Statement idQuery(db,
+                              "SELECT MonsterID FROM Monsters WHERE Name = ?");
     idQuery.bind(1, monsterName);
     int monsterId = -1;
     if (idQuery.executeStep()) {
@@ -432,8 +441,8 @@ int main(int argc, char *argv[]) {
   SDL_WindowFlags window_flags =
       (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
                         SDL_WINDOW_ALLOW_HIGHDPI);
-  SDL_Window *window = 
-      SDL_CreateWindow("initiativ - Bestiary", SDL_WINDOWPOS_CENTERED, 
+  SDL_Window *window =
+      SDL_CreateWindow("initiativ - Bestiary", SDL_WINDOWPOS_CENTERED,
                        SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
   SDL_GLContext gl_context = SDL_GL_CreateContext(window);
   SDL_GL_MakeCurrent(window, gl_context);
@@ -595,8 +604,7 @@ int rollDice(const std::string &diceString) {
         total -= modifier;
       }
     }
-  }
-  else {
+  } else {
     // Handle cases where it's just a number (e.g., "5")
     try {
       total = std::stoi(diceString);
@@ -959,15 +967,19 @@ void renderEncounterUI() {
             // Create a new vector to hold conditions that are still active
             std::vector<std::pair<std::string, int>> remainingConditions;
             for (const auto &condition : combatant.activeConditions) {
-              if (condition.second > 1) { // If duration is more than 1, decrement
-                remainingConditions.push_back({condition.first, condition.second - 1});
+              if (condition.second >
+                  1) { // If duration is more than 1, decrement
+                remainingConditions.push_back(
+                    {condition.first, condition.second - 1});
               } else { // Duration is 1, so it expires
                 std::stringstream ss;
-                ss << combatant.displayName << " is no longer " << condition.first << ".";
+                ss << combatant.displayName << " is no longer "
+                   << condition.first << ".";
                 g_combatLog.push_back({ss.str(), LogEntry::EVENT});
               }
             }
-            combatant.activeConditions = remainingConditions; // Update active conditions
+            combatant.activeConditions =
+                remainingConditions; // Update active conditions
           }
 
           g_currentTurnIndex =
@@ -1012,12 +1024,16 @@ void renderEncounterUI() {
   if (g_encounterList.empty()) {
     ImGui::Text("No combatants have been added yet.");
   } else {
-    if (ImGui::BeginTable("EncounterTable", 5, ImGuiTableFlags_Resizable)) { // Increased column count to 5
+    if (ImGui::BeginTable(
+            "EncounterTable", 5,
+            ImGuiTableFlags_Resizable)) { // Increased column count to 5
       ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
       ImGui::TableSetupColumn("HP", ImGuiTableColumnFlags_WidthFixed, 200.0f);
       ImGui::TableSetupColumn("Initiative", ImGuiTableColumnFlags_WidthFixed,
                               100.0f);
-      ImGui::TableSetupColumn("Conditions", ImGuiTableColumnFlags_WidthStretch); // New column for conditions
+      ImGui::TableSetupColumn(
+          "Conditions",
+          ImGuiTableColumnFlags_WidthStretch); // New column for conditions
       ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed,
                               100.0f);
       ImGui::TableHeadersRow();
@@ -1091,7 +1107,8 @@ void renderEncounterUI() {
         ImGui::TableSetColumnIndex(3); // New column for conditions
         if (!g_encounterList[i].activeConditions.empty()) {
           for (const auto &condition : g_encounterList[i].activeConditions) {
-            ImGui::TextWrapped("- %s (%d turns)", condition.first.c_str(), condition.second);
+            ImGui::TextWrapped("- %s (%d turns)", condition.first.c_str(),
+                               condition.second);
           }
         } else {
           ImGui::Text("None");
@@ -1362,13 +1379,13 @@ void resolveAction(TargetingState &targetingState) {
     }
 
     std::stringstream log_ss;
-    log_ss << activeCombatant.displayName << " uses " << ability.name << ". ";
+    log_ss << activeCombatant.displayName << " uses " << ability.name << ".";
     g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
-    log_ss.str("");
 
     for (int target_idx : targetingState.selectedTargets) {
+      log_ss.str("");
       Combatant &target = g_encounterList[target_idx];
-      
+
       bool hit = true;
       if (!ability.attackRollType.empty()) { // It's an attack roll ability
         int attack_roll = rollDice("1d20");
@@ -1380,16 +1397,24 @@ void resolveAction(TargetingState &targetingState) {
         int total_attack = attack_roll + attack_modifier;
 
         if (total_attack >= target.base.armorClass) {
-          log_ss << activeCombatant.displayName << "'s " << ability.name << " hits " << target.displayName << " (Attack Roll: " << attack_roll << " + " << attack_modifier << " = " << total_attack << " vs AC " << target.base.armorClass << "). ";
+          log_ss << activeCombatant.displayName << "'s " << ability.name
+                 << " hits " << target.displayName
+                 << " (Attack Roll: " << attack_roll << " + " << attack_modifier
+                 << " = " << total_attack << " vs AC " << target.base.armorClass
+                 << ").";
           hit = true;
         } else {
-          log_ss << activeCombatant.displayName << "'s " << ability.name << " misses " << target.displayName << " (Attack Roll: " << attack_roll << " + " << attack_modifier << " = " << total_attack << " vs AC " << target.base.armorClass << "). ";
+          log_ss << activeCombatant.displayName << "'s " << ability.name
+                 << " misses " << target.displayName
+                 << " (Attack Roll: " << attack_roll << " + " << attack_modifier
+                 << " = " << total_attack << " vs AC " << target.base.armorClass
+                 << ").";
           hit = false;
         }
         g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
-        log_ss.str("");
 
-      } else if (!ability.savingThrowType.empty()) { // It's a saving throw ability
+      } else if (!ability.savingThrowType
+                      .empty()) { // It's a saving throw ability
         if (target.isPlayer) {
           // Prompt user for player save result
           g_playerSaveState.isActive = true;
@@ -1401,28 +1426,31 @@ void resolveAction(TargetingState &targetingState) {
           return; // Pause action resolution until player input
         } else {
           int save_roll = rollDice("1d20");
-          // For simplicity, assuming target's own saving throw modifier
-          // A proper implementation would get the target's specific
-          // saving throw bonus
           int target_ability_score =
               getAbilityScore(target, ability.savingThrowType);
           int save_modifier = calculateModifier(target_ability_score);
           int total_save = save_roll + save_modifier;
 
           if (total_save >= ability.savingThrowDC) {
-            log_ss << target.displayName << " succeeds on a DC " << ability.savingThrowDC << " " << ability.savingThrowType << " saving throw (Roll: " << save_roll << " + " << save_modifier << " = " << total_save << "). ";
+            log_ss << target.displayName << " succeeds on a DC "
+                   << ability.savingThrowDC << " " << ability.savingThrowType
+                   << " saving throw (Roll: " << save_roll << " + "
+                   << save_modifier << " = " << total_save << ").";
             hit = false; // Save means no full effect
           } else {
-            log_ss << target.displayName << " fails on a DC " << ability.savingThrowDC << " " << ability.savingThrowType << " saving throw (Roll: " << save_roll << " + " << save_modifier << " = " << total_save << "). ";
+            log_ss << target.displayName << " fails on a DC "
+                   << ability.savingThrowDC << " " << ability.savingThrowType
+                   << " saving throw (Roll: " << save_roll << " + "
+                   << save_modifier << " = " << total_save << ").";
             hit = true; // Fail means full effect
           }
           g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
-          log_ss.str("");
         }
       }
 
       // Damage/Healing Application
       if (!ability.damageDice.empty()) {
+        log_ss.str("");
         int damage_roll = rollDice(ability.damageDice);
         int damage_modifier = 0;
         if (!ability.damageModifierAbility.empty()) {
@@ -1433,45 +1461,44 @@ void resolveAction(TargetingState &targetingState) {
         int total_calculated_value = damage_roll + damage_modifier;
         int final_value = total_calculated_value;
 
-        if (!hit && !ability.savingThrowType.empty()) { // Half damage on successful save
+        if (!hit && !ability.savingThrowType
+                         .empty()) { // Half damage on successful save
           final_value /= 2;
-          log_ss << target.displayName << " takes " << final_value << " " << ability.damageType << " damage (half on successful save). ";
+          target.currentHitPoints -= final_value;
+          log_ss << target.displayName << " takes " << final_value << " "
+                 << ability.damageType << " damage (half on successful save).";
           g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-          log_ss.str("");
         } else if (hit) { // Full damage on hit or failed save
           if (ability.damageType == "healing") {
-            target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + final_value);
-            log_ss << target.displayName << " heals for " << final_value << " hit points. ";
+            target.currentHitPoints = std::min(
+                target.maxHitPoints, target.currentHitPoints + final_value);
+            log_ss << target.displayName << " heals for " << final_value
+                   << " hit points.";
             g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
-            log_ss.str("");
           } else {
             target.currentHitPoints -= final_value;
-            log_ss << target.displayName << " takes " << final_value << " " << ability.damageType << " damage. ";
+            log_ss << target.displayName << " takes " << final_value << " "
+                   << ability.damageType << " damage.";
             g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-            log_ss.str("");
           }
-        }
-      } else { // No damage dice, but still an effect
-        if (!hit && !ability.savingThrowType.empty()) { // Successful save, no damage
-          // Log already handled by the save success message
-        } else if (hit) { // Failed save or hit, no damage, but some effect
-          // Log already handled by the hit/fail message
         }
       }
 
       // Condition Application (after damage/healing)
-      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
+      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])");
       std::smatch condition_matches;
-      if (std::regex_search(ability.description, condition_matches, condition_pattern)) {
+      if (std::regex_search(ability.description, condition_matches,
+                            condition_pattern)) {
+        log_ss.str("");
         std::string condition_name = condition_matches[1].str();
-        int duration = 1; // Default duration
-        if (condition_matches[2].matched) {
-            duration = std::stoi(condition_matches[2].str());
+        int duration = 1; // Default to 1 turn.
+        if (condition_matches.size() > 2 && condition_matches[2].matched) {
+          duration = std::stoi(condition_matches[2].str());
         }
         target.activeConditions.push_back({condition_name, duration});
-        log_ss << target.displayName << " is now " << condition_name << " for " << duration << " turns. ";
+        log_ss << target.displayName << " is now " << condition_name << " for "
+               << duration << " turn(s).";
         g_combatLog.push_back({log_ss.str(), LogEntry::EVENT});
-        log_ss.str("");
       }
     }
   } else if (targetingState.spell) {
@@ -1488,67 +1515,73 @@ void resolveAction(TargetingState &targetingState) {
     }
 
     std::stringstream log_ss;
-    log_ss << activeCombatant.displayName << " casts " << spell.name << ". ";
+    log_ss << activeCombatant.displayName << " casts " << spell.name << ".";
     g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
-    log_ss.str("");
 
     for (int target_idx : targetingState.selectedTargets) {
+      log_ss.str("");
       Combatant &target = g_encounterList[target_idx];
-      
+
       bool hit = true;
       if (!spell.attackRollType.empty()) { // It's an attack roll spell
         int attack_roll = rollDice("1d20");
-        int caster_ability_score = getAbilityScore(
-            activeCombatant,
-            spell.damageModifierAbility); // Assuming spellcasting ability
-                                              // is used for attack roll
+        int caster_ability_score =
+            getAbilityScore(activeCombatant, spell.damageModifierAbility);
         int attack_modifier = calculateModifier(caster_ability_score);
         int total_attack = attack_roll + attack_modifier;
 
         if (total_attack >= target.base.armorClass) {
-          log_ss << activeCombatant.displayName << "'s " << spell.name << " hits " << target.displayName << " (Attack Roll: " << attack_roll << " + " << attack_modifier << " = " << total_attack << " vs AC " << target.base.armorClass << "). ";
+          log_ss << activeCombatant.displayName << "'s " << spell.name
+                 << " hits " << target.displayName
+                 << " (Attack Roll: " << attack_roll << " + " << attack_modifier
+                 << " = " << total_attack << " vs AC " << target.base.armorClass
+                 << ").";
           hit = true;
         } else {
-          log_ss << activeCombatant.displayName << "'s " << spell.name << " misses " << target.displayName << " (Attack Roll: " << attack_roll << " + " << attack_modifier << " = " << total_attack << " vs AC " << target.base.armorClass << "). ";
+          log_ss << activeCombatant.displayName << "'s " << spell.name
+                 << " misses " << target.displayName
+                 << " (Attack Roll: " << attack_roll << " + " << attack_modifier
+                 << " = " << total_attack << " vs AC " << target.base.armorClass
+                 << ").";
           hit = false;
         }
         g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
-        log_ss.str("");
 
       } else if (!spell.savingThrowType.empty()) { // It's a saving throw spell
         if (target.isPlayer) {
-          // Prompt user for player save result
           g_playerSaveState.isActive = true;
           g_playerSaveState.targetIndex = target_idx;
           g_playerSaveState.saveType = spell.savingThrowType;
           g_playerSaveState.saveDC = spell.savingThrowDC;
           g_playerSaveState.ability = nullptr;
           g_playerSaveState.spell = &spell;
-          return; // Pause action resolution until player input
+          return;
         } else {
           int save_roll = rollDice("1d20");
-          // For simplicity, assuming target's own saving throw modifier
-          // A proper implementation would get the target's specific saving
-          // throw bonus
           int target_ability_score =
               getAbilityScore(target, spell.savingThrowType);
           int save_modifier = calculateModifier(target_ability_score);
           int total_save = save_roll + save_modifier;
 
           if (total_save >= spell.savingThrowDC) {
-            log_ss << target.displayName << " succeeds on a DC " << spell.savingThrowDC << " " << spell.savingThrowType << " saving throw (Roll: " << save_roll << " + " << save_modifier << " = " << total_save << "). ";
-            hit = false; // Save means no full effect
+            log_ss << target.displayName << " succeeds on a DC "
+                   << spell.savingThrowDC << " " << spell.savingThrowType
+                   << " saving throw (Roll: " << save_roll << " + "
+                   << save_modifier << " = " << total_save << ").";
+            hit = false;
           } else {
-            log_ss << target.displayName << " fails on a DC " << spell.savingThrowDC << " " << spell.savingThrowType << " saving throw (Roll: " << save_roll << " + " << save_modifier << " = " << total_save << "). ";
-            hit = true; // Fail means full effect
+            log_ss << target.displayName << " fails on a DC "
+                   << spell.savingThrowDC << " " << spell.savingThrowType
+                   << " saving throw (Roll: " << save_roll << " + "
+                   << save_modifier << " = " << total_save << ").";
+            hit = true;
           }
           g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
-          log_ss.str("");
         }
       }
 
-      // Damage/Healing Application
       if (!spell.damageDice.empty()) {
+        log_ss.str("");
         int damage_roll = rollDice(spell.damageDice);
         int damage_modifier = 0;
         if (!spell.damageModifierAbility.empty()) {
@@ -1559,45 +1592,42 @@ void resolveAction(TargetingState &targetingState) {
         int total_calculated_value = damage_roll + damage_modifier;
         int final_value = total_calculated_value;
 
-        if (!hit && !spell.savingThrowType.empty()) { // Half damage on successful save
+        if (!hit && !spell.savingThrowType.empty()) {
           final_value /= 2;
-          log_ss << target.displayName << " takes " << final_value << " " << spell.damageType << " damage (half on successful save). ";
+          target.currentHitPoints -= final_value;
+          log_ss << target.displayName << " takes " << final_value << " "
+                 << spell.damageType << " damage (half on successful save).";
           g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-          log_ss.str("");
-        } else if (hit) { // Full damage on hit or failed save
+        } else if (hit) {
           if (spell.damageType == "healing") {
-            target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + final_value);
-            log_ss << target.displayName << " heals for " << final_value << " hit points. ";
+            target.currentHitPoints = std::min(
+                target.maxHitPoints, target.currentHitPoints + final_value);
+            log_ss << target.displayName << " heals for " << final_value
+                   << " hit points.";
             g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
-            log_ss.str("");
           } else {
             target.currentHitPoints -= final_value;
-            log_ss << target.displayName << " takes " << final_value << " " << spell.damageType << " damage. ";
+            log_ss << target.displayName << " takes " << final_value << " "
+                   << spell.damageType << " damage.";
             g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-            log_ss.str("");
           }
-        }
-      } else { // No damage dice, but still an effect
-        if (!hit && !spell.savingThrowType.empty()) { // Successful save, no damage
-          // Log already handled by the save success message
-        } else if (hit) { // Failed save or hit, no damage, but some effect
-          // Log already handled by the hit/fail message
         }
       }
 
-      // Condition Application (after damage/healing)
-      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
+      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])");
       std::smatch condition_matches;
-      if (std::regex_search(spell.description, condition_matches, condition_pattern)) {
+      if (std::regex_search(spell.description, condition_matches,
+                            condition_pattern)) {
+        log_ss.str("");
         std::string condition_name = condition_matches[1].str();
-        int duration = 1; // Default duration
-        if (condition_matches[2].matched) {
-            duration = std::stoi(condition_matches[2].str());
+        int duration = 1;
+        if (condition_matches.size() > 2 && condition_matches[2].matched) {
+          duration = std::stoi(condition_matches[2].str());
         }
         target.activeConditions.push_back({condition_name, duration});
-        log_ss << target.displayName << " is now " << condition_name << " for " << duration << " turns. ";
+        log_ss << target.displayName << " is now " << condition_name << " for "
+               << duration << " turn(s).";
         g_combatLog.push_back({log_ss.str(), LogEntry::EVENT});
-        log_ss.str("");
       }
     }
   }
@@ -1609,36 +1639,21 @@ ActionType stringToActionType(const std::string &str) {
   std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(),
                  [](unsigned char c) { return std::tolower(c); });
 
-  std::cerr << "DEBUG: stringToActionType received: '" << str
-            << "' (lowercased: '" << lower_str << "')" << std::endl;
-
   if (lower_str.find("bonus action") != std::string::npos) {
-    std::cerr << "DEBUG: Matched bonus action"
-              << std::endl;
     return ActionType::BONUS_ACTION;
   }
   if (lower_str.find("action") != std::string::npos) {
-    std::cerr << "DEBUG: Matched action"
-              << std::endl;
     return ActionType::ACTION;
   }
   if (lower_str.find("reaction") != std::string::npos) {
-    std::cerr << "DEBUG: Matched reaction"
-              << std::endl;
     return ActionType::REACTION;
   }
   if (lower_str.find("legendary") != std::string::npos) {
-    std::cerr << "DEBUG: Matched legendary"
-              << std::endl;
     return ActionType::LEGENDARY;
   }
   if (lower_str.find("lair") != std::string::npos) {
-    std::cerr << "DEBUG: Matched lair"
-              << std::endl;
     return ActionType::LAIR;
   }
-  std::cerr << "DEBUG: No match, returning NONE"
-            << std::endl;
   return ActionType::NONE;
 }
 
@@ -1668,14 +1683,12 @@ std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db) {
         ability.rechargeValue = query.getColumn(5).getInt();
       }
 
-      // Read and set the ActionType
       if (!query.getColumn(6).isNull()) {
         ability.actionType = stringToActionType(query.getColumn(6).getString());
       } else {
         ability.actionType = ActionType::NONE;
       }
 
-      // Read and set the new fields
       ability.targetType = query.getColumn(7).getString();
       ability.attackRollType = query.getColumn(8).getString();
       ability.savingThrowType = query.getColumn(9).getString();
@@ -1702,7 +1715,7 @@ void renderPlayerSaveUI() {
 
   Combatant &target = g_encounterList[g_playerSaveState.targetIndex];
   const char *actionName = "";
-  const std::string *description_ptr = nullptr; // Pointer to the description string
+  const std::string *description_ptr = nullptr;
 
   if (g_playerSaveState.ability) {
     actionName = g_playerSaveState.ability->name.c_str();
@@ -1712,7 +1725,6 @@ void renderPlayerSaveUI() {
     description_ptr = &g_playerSaveState.spell->description;
   }
 
-  // The prompt is displayed by ImGui::Text, no need to log it.
   ImGui::Text("%s must make a %s saving throw vs DC %d for %s.",
               target.displayName.c_str(), g_playerSaveState.saveType.c_str(),
               g_playerSaveState.saveDC, actionName);
@@ -1720,177 +1732,112 @@ void renderPlayerSaveUI() {
 
   if (ImGui::Button("Success")) {
     std::stringstream log_ss;
-    int total_damage = 0;
-    std::string damage_type;
-    int full_damage_value = 0;
 
-    if (g_playerSaveState.ability && !g_playerSaveState.ability->damageDice.empty()) {
-      int damage_roll = rollDice(g_playerSaveState.ability->damageDice);
+    const std::string *damageDice = g_playerSaveState.ability
+                                        ? &g_playerSaveState.ability->damageDice
+                                        : &g_playerSaveState.spell->damageDice;
+    const std::string *damageType = g_playerSaveState.ability
+                                        ? &g_playerSaveState.ability->damageType
+                                        : &g_playerSaveState.spell->damageType;
+    const std::string *damageModifierAbility =
+        g_playerSaveState.ability
+            ? &g_playerSaveState.ability->damageModifierAbility
+            : &g_playerSaveState.spell->damageModifierAbility;
+
+    if (!damageDice->empty()) {
+      int damage_roll = rollDice(*damageDice);
       int damage_modifier = 0;
-      if (!g_playerSaveState.ability->damageModifierAbility.empty()) {
+      if (!damageModifierAbility->empty()) {
         int attacker_ability_score = getAbilityScore(
-            g_encounterList[g_currentTurnIndex],
-            g_playerSaveState.ability->damageModifierAbility);
+            g_encounterList[g_currentTurnIndex], *damageModifierAbility);
         damage_modifier = calculateModifier(attacker_ability_score);
       }
-      full_damage_value = damage_roll + damage_modifier;
-      total_damage = full_damage_value / 2;
-      damage_type = g_playerSaveState.ability->damageType;
+      int full_damage_value = damage_roll + damage_modifier;
+      int total_damage = full_damage_value / 2;
 
-      if (damage_type == "healing") {
-        target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + total_damage);
-        log_ss << target.displayName << " successfully saves against " << actionName << ", healing for " << total_damage << " hit points (half effect). ";
+      if (*damageType == "healing") {
+        target.currentHitPoints = std::min(
+            target.maxHitPoints, target.currentHitPoints + total_damage);
+        log_ss << target.displayName << " successfully saves against "
+               << actionName << ", healing for " << total_damage
+               << " hit points (half effect).";
         g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
       } else {
         target.currentHitPoints -= total_damage;
-        log_ss << target.displayName << " resists the " << actionName << ", taking only " << total_damage << " " << damage_type << " damage instead of the full " << full_damage_value << ". ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-      }
-    } else if (g_playerSaveState.spell && !g_playerSaveState.spell->damageDice.empty()) {
-      int damage_roll = rollDice(g_playerSaveState.spell->damageDice);
-      int damage_modifier = 0;
-      if (!g_playerSaveState.spell->damageModifierAbility.empty()) {
-        int caster_ability_score = getAbilityScore(
-            g_encounterList[g_currentTurnIndex],
-            g_playerSaveState.spell->damageModifierAbility);
-        damage_modifier = calculateModifier(caster_ability_score);
-      }
-      full_damage_value = damage_roll + damage_modifier;
-      total_damage = full_damage_value / 2;
-      damage_type = g_playerSaveState.spell->damageType;
-
-      if (damage_type == "healing") {
-        target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + total_damage);
-        log_ss << target.displayName << " successfully saves against " << actionName << ", healing for " << total_damage << " hit points (half effect). ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
-      } else {
-        target.currentHitPoints -= total_damage;
-        log_ss << target.displayName << " resists the " << actionName << ", taking only " << total_damage << " " << damage_type << " damage instead of the full " << full_damage_value << ". ";
+        log_ss << target.displayName << " resists the " << actionName
+               << ", taking only " << total_damage << " " << *damageType
+               << " damage instead of the full " << full_damage_value << ".";
         g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
       }
     } else {
-      log_ss << target.displayName << " successfully saves against " << actionName << ". ";
+      log_ss << target.displayName << " successfully saves against "
+             << actionName << ".";
       g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
-    }
-
-    if (damage_type == "healing") {
-        target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + total_damage);
-        log_ss << target.displayName << " successfully saves against " << actionName << ", healing for " << total_damage << " hit points (half effect). ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
-      } else {
-        target.currentHitPoints -= total_damage;
-        log_ss << target.displayName << " resists the " << actionName << ", taking only " << total_damage << " " << damage_type << " damage instead of the full " << full_damage_value << ". ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-      }
-    } else if (g_playerSaveState.spell && !g_playerSaveState.spell->damageDice.empty()) {
-      int damage_roll = rollDice(g_playerSaveState.spell->damageDice);
-      int damage_modifier = 0;
-      if (!g_playerSaveState.spell->damageModifierAbility.empty()) {
-        int caster_ability_score = getAbilityScore(
-            g_encounterList[g_currentTurnIndex],
-            g_playerSaveState.spell->damageModifierAbility);
-        damage_modifier = calculateModifier(caster_ability_score);
-      }
-      full_damage_value = damage_roll + damage_modifier;
-      total_damage = full_damage_value / 2;
-      damage_type = g_playerSaveState.spell->damageType;
-
-      if (damage_type == "healing") {
-        target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + total_damage);
-        log_ss << target.displayName << " successfully saves against " << actionName << ", healing for " << total_damage << " hit points (half effect). ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
-      } else {
-        target.currentHitPoints -= total_damage;
-        log_ss << target.displayName << " resists the " << actionName << ", taking only " << total_damage << " " << damage_type << " damage instead of the full " << full_damage_value << ". ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-      }
-    } else {
-      log_ss << target.displayName << " successfully saves against " << actionName << ". ";
-      g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
-    }
-
-    // Condition Application (after damage/healing)
-    if (description_ptr) {
-      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
-      std::smatch condition_matches;
-      if (std::regex_search(*description_ptr, condition_matches, condition_pattern)) {
-        std::string condition_name = condition_matches[1].str();
-        int duration = 1; // Default duration
-        if (condition_matches[2].matched) {
-            duration = std::stoi(condition_matches[2].str());
-        }
-        target.activeConditions.push_back({condition_name, duration});
-        // No log here, as per user's request for concise logging.
-      }
     }
 
     g_playerSaveState.isActive = false;
   }
+
   ImGui::SameLine();
+
   if (ImGui::Button("Failure")) {
     std::stringstream log_ss;
-    int total_damage = 0;
-    std::string damage_type;
 
-    if (g_playerSaveState.ability && !g_playerSaveState.ability->damageDice.empty()) {
-      int damage_roll = rollDice(g_playerSaveState.ability->damageDice);
+    const std::string *damageDice = g_playerSaveState.ability
+                                        ? &g_playerSaveState.ability->damageDice
+                                        : &g_playerSaveState.spell->damageDice;
+    const std::string *damageType = g_playerSaveState.ability
+                                        ? &g_playerSaveState.ability->damageType
+                                        : &g_playerSaveState.spell->damageType;
+    const std::string *damageModifierAbility =
+        g_playerSaveState.ability
+            ? &g_playerSaveState.ability->damageModifierAbility
+            : &g_playerSaveState.spell->damageModifierAbility;
+
+    if (!damageDice->empty()) {
+      int damage_roll = rollDice(*damageDice);
       int damage_modifier = 0;
-      if (!g_playerSaveState.ability->damageModifierAbility.empty()) {
+      if (!damageModifierAbility->empty()) {
         int attacker_ability_score = getAbilityScore(
-            g_encounterList[g_currentTurnIndex],
-            g_playerSaveState.ability->damageModifierAbility);
+            g_encounterList[g_currentTurnIndex], *damageModifierAbility);
         damage_modifier = calculateModifier(attacker_ability_score);
       }
-      total_damage = damage_roll + damage_modifier;
-      damage_type = g_playerSaveState.ability->damageType;
+      int total_damage = damage_roll + damage_modifier;
 
-      if (damage_type == "healing") {
-        target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + total_damage);
-        log_ss << target.displayName << " fails to save against " << actionName << ", healing for " << total_damage << " hit points (full effect). ";
+      if (*damageType == "healing") {
+        target.currentHitPoints = std::min(
+            target.maxHitPoints, target.currentHitPoints + total_damage);
+        log_ss << target.displayName << " fails to save against " << actionName
+               << ", healing for " << total_damage << " hit points.";
         g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
       } else {
         target.currentHitPoints -= total_damage;
-        log_ss << target.displayName << " fails to save against " << actionName << ", taking " << total_damage << " " << damage_type << " damage. ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-      }
-    } else if (g_playerSaveState.spell && !g_playerSaveState.spell->damageDice.empty()) {
-      int damage_roll = rollDice(g_playerSaveState.spell->damageDice);
-      int damage_modifier = 0;
-      if (!g_playerSaveState.spell->damageModifierAbility.empty()) {
-        int caster_ability_score = getAbilityScore(
-            g_encounterList[g_currentTurnIndex],
-            g_playerSaveState.spell->damageModifierAbility);
-        damage_modifier = calculateModifier(caster_ability_score);
-      }
-      total_damage = damage_roll + damage_modifier;
-      damage_type = g_playerSaveState.spell->damageType;
-
-      if (damage_type == "healing") {
-        target.currentHitPoints = std::min(target.maxHitPoints, target.currentHitPoints + total_damage);
-        log_ss << target.displayName << " fails to save against " << actionName << ", healing for " << total_damage << " hit points (full effect). ";
-        g_combatLog.push_back({log_ss.str(), LogEntry::HEALING});
-      } else {
-        target.currentHitPoints -= total_damage;
-        log_ss << target.displayName << " fails to save against " << actionName << ", taking " << total_damage << " " << damage_type << " damage. ";
+        log_ss << target.displayName << " fails to save against " << actionName
+               << ", taking " << total_damage << " " << *damageType
+               << " damage.";
         g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
       }
     } else {
-      log_ss << target.displayName << " fails to save against " << actionName << ". ";
+      log_ss << target.displayName << " fails to save against " << actionName
+             << ".";
       g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
     }
 
-    // Condition Application (after damage/healing)
     if (description_ptr) {
-      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])"); // Updated regex to capture duration
+      std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])");
       std::smatch condition_matches;
-      if (std::regex_search(*description_ptr, condition_matches, condition_pattern)) {
+      if (std::regex_search(*description_ptr, condition_matches,
+                            condition_pattern)) {
+        log_ss.str("");
         std::string condition_name = condition_matches[1].str();
-        int duration = 1; // Default duration
-        if (condition_matches[2].matched) {
-            duration = std::stoi(condition_matches[2].str());
+        int duration = 1;
+        if (condition_matches.size() > 2 && condition_matches[2].matched) {
+          duration = std::stoi(condition_matches[2].str());
         }
         target.activeConditions.push_back({condition_name, duration});
-        // No log here, as per user's request for concise logging.
+        log_ss << target.displayName << " is now " << condition_name << " for "
+               << duration << " turn(s).";
+        g_combatLog.push_back({log_ss.str(), LogEntry::EVENT});
       }
     }
 
