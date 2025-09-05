@@ -1,41 +1,169 @@
 #pragma once
+
 #include <map>
+#include <memory> // For std::unique_ptr
 #include <string>
 #include <vector>
 
 // An enum for clarity and to prevent trivial errors
 enum class ActionType { NONE, ACTION, BONUS_ACTION, REACTION, LEGENDARY, LAIR };
+enum class TriggerCondition {
+  ALWAYS,
+  ON_HIT,
+  ON_MISS,
+  ON_SAVE_SUCCESS,
+  ON_SAVE_FAIL
+};
+
+// --- The Core of the New Engine: The Effect Tree ---
+struct Effect {
+  // --- Core Mechanics ---
+  std::string description;
+  std::string attackRollType;
+  std::string savingThrowType;
+  int savingThrowDC = 0;
+  std::string damageDice;
+  std::string damageType;
+  std::string damageModifierAbility;
+  std::string conditionToApply;
+
+  // --- Chaining Logic ---
+  TriggerCondition trigger = TriggerCondition::ALWAYS;
+  std::vector<std::unique_ptr<Effect>> childEffects;
+
+  // --- Rule of Five for correct resource management of unique_ptr ---
+  Effect() = default;
+
+  // 1. Copy Constructor (for deep copying the effect tree)
+  Effect(const Effect &other)
+      : description(other.description), attackRollType(other.attackRollType),
+        savingThrowType(other.savingThrowType),
+        savingThrowDC(other.savingThrowDC), damageDice(other.damageDice),
+        damageType(other.damageType),
+        damageModifierAbility(other.damageModifierAbility),
+        conditionToApply(other.conditionToApply), trigger(other.trigger) {
+    childEffects.reserve(other.childEffects.size());
+    for (const auto &child : other.childEffects) {
+      childEffects.push_back(std::make_unique<Effect>(*child));
+    }
+  }
+
+  // 2. Copy Assignment Operator
+  Effect &operator=(const Effect &other) {
+    if (this != &other) {
+      description = other.description;
+      attackRollType = other.attackRollType;
+      savingThrowType = other.savingThrowType;
+      savingThrowDC = other.savingThrowDC;
+      damageDice = other.damageDice;
+      damageType = other.damageType;
+      damageModifierAbility = other.damageModifierAbility;
+      conditionToApply = other.conditionToApply;
+      trigger = other.trigger;
+
+      childEffects.clear();
+      childEffects.reserve(other.childEffects.size());
+      for (const auto &child : other.childEffects) {
+        childEffects.push_back(std::make_unique<Effect>(*child));
+      }
+    }
+    return *this;
+  }
+
+  // 3. Move Constructor (efficiently transfers ownership)
+  Effect(Effect &&other) noexcept = default;
+  // 4. Move Assignment Operator
+  Effect &operator=(Effect &&other) noexcept = default;
+  // 5. Destructor (implicitly handled by unique_ptr)
+  ~Effect() = default;
+};
 
 struct Ability {
   std::string name;
   std::string description;
+  ActionType actionType = ActionType::NONE;
   std::string type;
   std::string usageType;
   int usesMax = 0;
   int rechargeValue = 0;
-  ActionType actionType = ActionType::NONE; // The cost of using the ability
-  std::string targetType;                   // New
-  std::string attackRollType;               // New
-  std::string savingThrowType;              // New
-  int savingThrowDC = 0;                    // New
-  std::string damageDice;                   // New
-  std::string damageType;                   // New
-  std::string damageModifierAbility;        // New
+  std::vector<std::unique_ptr<Effect>> rootEffects;
+
+  // --- Rule of Five for correct copying of abilities ---
+  Ability() = default;
+
+  Ability(const Ability &other)
+      : name(other.name), description(other.description),
+        actionType(other.actionType), type(other.type),
+        usageType(other.usageType), usesMax(other.usesMax),
+        rechargeValue(other.rechargeValue) {
+    rootEffects.reserve(other.rootEffects.size());
+    for (const auto &effect : other.rootEffects) {
+      rootEffects.push_back(std::make_unique<Effect>(*effect));
+    }
+  }
+
+  Ability &operator=(const Ability &other) {
+    if (this != &other) {
+      name = other.name;
+      description = other.description;
+      actionType = other.actionType;
+      type = other.type;
+      usageType = other.usageType;
+      usesMax = other.usesMax;
+      rechargeValue = other.rechargeValue;
+
+      rootEffects.clear();
+      rootEffects.reserve(other.rootEffects.size());
+      for (const auto &effect : other.rootEffects) {
+        rootEffects.push_back(std::make_unique<Effect>(*effect));
+      }
+    }
+    return *this;
+  }
+
+  Ability(Ability &&other) noexcept = default;
+  Ability &operator=(Ability &&other) noexcept = default;
+  ~Ability() = default;
 };
 
 struct Spell {
   std::string name;
-  std::string description; // New
+  std::string description;
   int level;
-  ActionType actionType = ActionType::NONE; // Changed default to NONE, as it's
-                                            // explicitly set from DB
-  std::string targetType;                   // New
-  std::string attackRollType;               // New
-  std::string savingThrowType;              // New
-  int savingThrowDC = 0;                    // New
-  std::string damageDice;                   // New
-  std::string damageType;                   // New
-  std::string damageModifierAbility;        // New
+  ActionType actionType = ActionType::NONE;
+  std::vector<std::unique_ptr<Effect>> rootEffects;
+
+  // --- Rule of Five for correct copying of spells ---
+  Spell() = default;
+
+  Spell(const Spell &other)
+      : name(other.name), description(other.description), level(other.level),
+        actionType(other.actionType) {
+    rootEffects.reserve(other.rootEffects.size());
+    for (const auto &effect : other.rootEffects) {
+      rootEffects.push_back(std::make_unique<Effect>(*effect));
+    }
+  }
+
+  Spell &operator=(const Spell &other) {
+    if (this != &other) {
+      name = other.name;
+      description = other.description;
+      level = other.level;
+      actionType = other.actionType;
+
+      rootEffects.clear();
+      rootEffects.reserve(other.rootEffects.size());
+      for (const auto &effect : other.rootEffects) {
+        rootEffects.push_back(std::make_unique<Effect>(*effect));
+      }
+    }
+    return *this;
+  }
+
+  Spell(Spell &&other) noexcept = default;
+  Spell &operator=(Spell &&other) noexcept = default;
+  ~Spell() = default;
 };
 
 struct Monster {
@@ -58,7 +186,6 @@ struct Monster {
   int spellSaveDC = 0;
   int spellAttackBonus = 0;
 
-  // Using vectors to hold the various details from join tables
   std::vector<std::string> speeds;
   std::vector<std::string> skills;
   std::vector<std::string> savingThrows;
@@ -72,7 +199,7 @@ struct Monster {
 };
 
 struct Combatant {
-  Monster base; // The creature's core statistics
+  Monster base;
   std::string displayName;
   int initiative = 0;
   int currentHitPoints = 0;
@@ -80,20 +207,12 @@ struct Combatant {
   bool isPlayer = false;
   int spellSaveDC = 0;
   int spellAttackBonus = 0;
-
-  // Tracking for limited-use abilities
   std::map<std::string, int> abilityUses;
-
-  // Spell slot tracking
-  std::vector<int> spellSlots;    // Current slots
-  std::vector<int> maxSpellSlots; // Maximum slots
-
-  // --- New Strategic Variables ---
+  std::vector<int> spellSlots;
+  std::vector<int> maxSpellSlots;
   bool hasUsedAction = false;
   bool hasUsedBonusAction = false;
-  std::vector<std::pair<std::string, int>>
-      activeConditions; // New: Track active conditions (name, duration)
-  // bool hasUsedReaction = false; // For future campaigns
+  std::vector<std::pair<std::string, int>> activeConditions;
 
   Combatant() = default;
   explicit Combatant(const Monster &monster)
@@ -101,7 +220,6 @@ struct Combatant {
         currentHitPoints(monster.hitPoints), maxHitPoints(monster.hitPoints),
         spellSaveDC(monster.spellSaveDC),
         spellAttackBonus(monster.spellAttackBonus) {
-    // Initialize ability uses from the base monster's abilities
     for (const auto &ability : base.abilities) {
       if (ability.usesMax > 0) {
         abilityUses[ability.name] = ability.usesMax;
