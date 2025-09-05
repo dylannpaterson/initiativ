@@ -63,8 +63,8 @@ std::vector<LogEntry> g_combatLog;
 
 // --- Function Declarations ---
 void renderBestiaryUI();
-void renderCombatUI();    // The new battlefield view
-void renderEncounterUI(); // Our new command tent
+void renderCombatUI();
+void renderEncounterUI();
 void renderCombatLogUI();
 void renderStatBlock(const Monster &monster);
 void initImGui(SDL_Window *window, SDL_GLContext gl_context);
@@ -97,7 +97,6 @@ void renderCombatLogUI() {
     ImGui::TextWrapped("%s", entry.message.c_str());
     ImGui::PopStyleColor();
   }
-  // Auto-scroll to the bottom
   if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
     ImGui::SetScrollHereY(1.0f);
   }
@@ -106,7 +105,6 @@ void renderCombatLogUI() {
 std::vector<std::string> getMonsterNames(SQLite::Database &db);
 Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName);
 
-// --- New Functions to get details from join tables ---
 std::vector<std::string> getMonsterSkills(int monsterId, SQLite::Database &db);
 std::vector<std::string> getMonsterSavingThrows(int monsterId,
                                                 SQLite::Database &db);
@@ -119,14 +117,11 @@ std::vector<std::string> getMonsterDamageResistances(int monsterId,
                                                      SQLite::Database &db);
 std::vector<std::string> getMonsterDamageVulnerabilities(int monsterId,
                                                          SQLite::Database &db);
-std::vector<Ability>
-getMonsterAbilities(int monsterId,
-                    SQLite::Database &db); // Corrected declaration
+std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db);
 std::vector<std::string> getMonsterSpeeds(int monsterId, SQLite::Database &db);
 std::vector<int> getMonsterSpellSlots(int monsterId, SQLite::Database &db);
 std::vector<Spell> getMonsterSpells(int monsterId, SQLite::Database &db);
 
-// Function to fetch all monster names from the database
 std::vector<std::string> getMonsterNames(SQLite::Database &db) {
   std::vector<std::string> monsterNames;
   try {
@@ -140,7 +135,6 @@ std::vector<std::string> getMonsterNames(SQLite::Database &db) {
   return monsterNames;
 }
 
-// Function to fetch a single monster's details by name
 std::vector<int> getMonsterSpellSlots(int monsterId, SQLite::Database &db) {
   std::vector<int> spellSlots(9, 0);
   try {
@@ -168,10 +162,9 @@ std::vector<Spell> getMonsterSpells(int monsterId, SQLite::Database &db) {
     SQLite::Statement query(
         db, "SELECT S.Name, S.Level, S.CastingTime, S.Description, "
             "S.SavingThrowType, S.SavingThrowDC, S.DamageDice, S.DamageType, "
-            "S.DamageModifierAbility "
-            "FROM Spells AS S "
-            "INNER JOIN Monster_Spells AS MS ON S.SpellID = MS.SpellID "
-            "WHERE MS.MonsterID = ? ORDER BY S.Level, S.Name");
+            "S.DamageModifierAbility FROM Spells AS S INNER JOIN "
+            "Monster_Spells AS MS ON S.SpellID = MS.SpellID WHERE MS.MonsterID "
+            "= ? ORDER BY S.Level, S.Name");
     query.bind(1, monsterId);
     while (query.executeStep()) {
       Spell spell;
@@ -179,13 +172,11 @@ std::vector<Spell> getMonsterSpells(int monsterId, SQLite::Database &db) {
       spell.level = query.getColumn(1).getInt();
       spell.actionType = stringToActionType(query.getColumn(2).getString());
       spell.description = query.getColumn(3).getString();
-      // --- The Crucial Intelligence ---
       spell.savingThrowType = query.getColumn(4).getString();
       spell.savingThrowDC = query.getColumn(5).getInt();
       spell.damageDice = query.getColumn(6).getString();
       spell.damageType = query.getColumn(7).getString();
       spell.damageModifierAbility = query.getColumn(8).getString();
-      // --- End ---
       spells.push_back(spell);
     }
   } catch (const std::exception &e) {
@@ -194,11 +185,9 @@ std::vector<Spell> getMonsterSpells(int monsterId, SQLite::Database &db) {
   return spells;
 }
 
-// Function to fetch a single monster's details by name
 Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
   Monster monster;
   try {
-    // We must first get the MonsterID to query the join tables
     SQLite::Statement idQuery(db,
                               "SELECT MonsterID FROM Monsters WHERE Name = ?");
     idQuery.bind(1, monsterName);
@@ -210,13 +199,11 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
       return monster;
     }
 
-    // Now, fetch all core information
     SQLite::Statement coreQuery(
         db, "SELECT Name, Size, Type, Alignment, ArmorClass, HitPoints_Avg, "
             "HitPoints_Formula, Strength, Dexterity, Constitution, "
-            "Intelligence, Wisdom, Charisma, ChallengeRating, Languages "
-            "FROM Monsters WHERE MonsterID = ?");
-
+            "Intelligence, Wisdom, Charisma, ChallengeRating, Languages, "
+            "SpellSaveDC, SpellAttackBonus FROM Monsters WHERE MonsterID = ?");
     coreQuery.bind(1, monsterId);
 
     if (coreQuery.executeStep()) {
@@ -235,9 +222,10 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
       monster.charisma = coreQuery.getColumn(12).getInt();
       monster.challengeRating = coreQuery.getColumn(13).getString();
       monster.languages = coreQuery.getColumn(14).getString();
+      monster.spellSaveDC = coreQuery.getColumn(15).getInt();
+      monster.spellAttackBonus = coreQuery.getColumn(16).getInt();
     }
 
-    // Now, fetch all the additional details from the join tables
     monster.speeds = getMonsterSpeeds(monsterId, db);
     monster.skills = getMonsterSkills(monsterId, db);
     monster.savingThrows = getMonsterSavingThrows(monsterId, db);
@@ -256,7 +244,6 @@ Monster getMonsterByName(SQLite::Database &db, const std::string &monsterName) {
   return monster;
 }
 
-// --- Implement the new data fetching functions ---
 std::vector<std::string> getMonsterSpeeds(int monsterId, SQLite::Database &db) {
   std::vector<std::string> speeds;
   try {
@@ -419,14 +406,12 @@ std::vector<std::string> getMonsterDamageVulnerabilities(int monsterId,
 }
 
 int main(int argc, char *argv[]) {
-  // --- Initialize SDL2 and OpenGL ---
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) !=
       0) {
     std::cerr << "Error: " << SDL_GetError() << std::endl;
     return -1;
   }
 
-  // Seed the random number generator once at the start of the campaign
   srand(time(nullptr));
 
   const char *glsl_version = "#version 130";
@@ -446,26 +431,22 @@ int main(int argc, char *argv[]) {
                        SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
   SDL_GLContext gl_context = SDL_GL_CreateContext(window);
   SDL_GL_MakeCurrent(window, gl_context);
-  SDL_GL_SetSwapInterval(1); // Enable vsync
+  SDL_GL_SetSwapInterval(1);
 
-  // --- Initialize ImGui ---
   initImGui(window, gl_context);
 
-  // --- Test SQLiteCpp Database Connection and Cache Names ---
   static SQLite::Database db("../data/initiativ.sqlite", SQLite::OPEN_READONLY);
-  g_db = &db; // A strategic pointer to our database
+  g_db = &db;
   std::cout << "Successfully opened database." << std::endl;
   g_monsterNames = getMonsterNames(db);
   std::cout << "Successfully fetched " << g_monsterNames.size()
             << " monster names." << std::endl;
 
-  // Initialize the UI with the full list and select the first monster
   g_filteredMonsterNames = g_monsterNames;
   if (!g_filteredMonsterNames.empty()) {
     g_currentMonster = getMonsterByName(db, g_filteredMonsterNames[0]);
   }
 
-  // --- Main application loop ---
   bool done = false;
   while (!done) {
     SDL_Event event;
@@ -479,16 +460,14 @@ int main(int argc, char *argv[]) {
         done = true;
     }
 
-    // Start the ImGui frame
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
-    // --- Conditional Rendering based on Combat State ---
     if (g_combatHasBegun) {
-      renderEncounterUI(); // The roster is always visible
-      renderCombatUI();    // The new combat console
-      renderCombatLogUI(); // Display the combat log
+      renderEncounterUI();
+      renderCombatUI();
+      renderCombatLogUI();
       if (g_targetingState.isTargeting) {
         renderTargetingUI();
       }
@@ -496,14 +475,13 @@ int main(int argc, char *argv[]) {
         renderPlayerSaveUI();
       }
     } else {
-      renderBestiaryUI(); // Show setup tools
+      renderBestiaryUI();
       renderEncounterUI();
       if (!g_currentMonster.name.empty()) {
-        renderStatBlock(g_currentMonster); // Show statblock during setup
+        renderStatBlock(g_currentMonster);
       }
     }
 
-    // Rendering
     ImGui::Render();
     glViewport(0, 0, (int)ImGui::GetIO().DisplaySize.x,
                (int)ImGui::GetIO().DisplaySize.y);
@@ -512,7 +490,6 @@ int main(int argc, char *argv[]) {
     SDL_GL_SwapWindow(window);
   }
 
-  // --- Cleanup ---
   shutdownImGui();
   SDL_GL_DeleteContext(gl_context);
   SDL_DestroyWindow(window);
@@ -522,24 +499,18 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-// --- ImGui Helper Functions ---
 void initImGui(SDL_Window *window, SDL_GLContext gl_context) {
-  // Setup Dear ImGui context
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
-  (void)io; // Suppress warning about unused variable
-  io.ConfigFlags |
-      ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-  io.ConfigFlags | ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
+  (void)io;
+  io.ConfigFlags | ImGuiConfigFlags_NavEnableKeyboard;
+  io.ConfigFlags | ImGuiConfigFlags_NavEnableGamepad;
 
-  // Setup Dear ImGui style
   ImGui::StyleColorsDark();
 
-  // Load a font to improve readability
   io.Fonts->AddFontFromFileTTF("../data/fonts/FiraSans-Regular.ttf", 36.0f);
 
-  // Setup Platform/Renderer backends
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
   ImGui_ImplOpenGL3_Init("#version 130");
 }
@@ -550,7 +521,6 @@ void shutdownImGui() {
   ImGui::DestroyContext();
 }
 
-// Helper function to render a list of strings
 void renderStringList(const char *label, const std::vector<std::string> &list) {
   if (!list.empty()) {
     ImGui::Text("%s", label);
@@ -566,24 +536,19 @@ void renderStringList(const char *label, const std::vector<std::string> &list) {
   }
 }
 
-// Helper function to create a labeled field
 void renderLabeledField(const char *label, const char *value) {
   ImGui::Text("%s", label);
   ImGui::SameLine();
   ImGui::Text("%s", value);
 }
 
-// Helper function to calculate a modifier from a stat score
 int calculateModifier(int score) { return (score - 10) / 2; }
 
-// Helper function to parse dice strings and roll dice
 int rollDice(const std::string &diceString) {
   int total = 0;
   std::string s = diceString;
-  std::transform(s.begin(), s.end(), s.begin(),
-                 ::tolower); // Convert to lowercase
+  std::transform(s.begin(), s.end(), s.begin(), ::tolower);
 
-  // Regex to match NdN[+/-M]
   std::regex pattern(R"((\d+)d(\d+)(?:([+-])(\d+))?)");
   std::smatch matches;
 
@@ -591,11 +556,11 @@ int rollDice(const std::string &diceString) {
     int numDice = std::stoi(matches[1].str());
     int dieType = std::stoi(matches[2].str());
 
-    for (int i = 0; i < numDice; ++i) { // Use g_rng for random numbers
+    for (int i = 0; i < numDice; ++i) {
       total += (std::uniform_int_distribution<>(1, dieType))(g_rng);
     }
 
-    if (matches[3].matched) { // Check if modifier exists
+    if (matches[3].matched) {
       char sign = matches[3].str()[0];
       int modifier = std::stoi(matches[4].str());
       if (sign == '+') {
@@ -605,23 +570,21 @@ int rollDice(const std::string &diceString) {
       }
     }
   } else {
-    // Handle cases where it's just a number (e.g., "5")
     try {
       total = std::stoi(diceString);
     } catch (const std::invalid_argument &e) {
       std::cerr << "Error: Invalid dice string format: " << diceString
                 << std::endl;
-      return 0; // Or throw an exception
+      return 0;
     } catch (const std::out_of_range &e) {
       std::cerr << "Error: Dice string out of range: " << diceString
                 << std::endl;
-      return 0; // Or throw an exception
+      return 0;
     }
   }
   return total;
 }
 
-// Helper function to get ability score from Combatant based on string name
 int getAbilityScore(const Combatant &combatant,
                     const std::string &abilityName) {
   std::string lowerAbilityName = abilityName;
@@ -640,14 +603,13 @@ int getAbilityScore(const Combatant &combatant,
     return combatant.base.wisdom;
   if (lowerAbilityName == "charisma")
     return combatant.base.charisma;
-  return 0; // Default or error
+  return 0;
 }
 
 void renderStatBlock(const Monster &monster) {
   ImGui::SetNextWindowSize(ImVec2(500, 700), ImGuiCond_FirstUseEver);
   ImGui::Begin("Monster Statblock", nullptr, ImGuiWindowFlags_MenuBar);
 
-  // Header section
   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
   ImGui::Text("%s", monster.name.c_str());
   ImGui::PopStyleColor();
@@ -655,7 +617,6 @@ void renderStatBlock(const Monster &monster) {
               monster.type.c_str(), monster.alignment.c_str());
   ImGui::Separator();
 
-  // Core Stats
   ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
   if (ImGui::CollapsingHeader("Core Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
@@ -681,7 +642,6 @@ void renderStatBlock(const Monster &monster) {
 
   ImGui::Separator();
 
-  // The six core attributes in a clean, horizontal format
   ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
   if (ImGui::CollapsingHeader("Attributes", ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
@@ -728,29 +688,23 @@ void renderStatBlock(const Monster &monster) {
 
   ImGui::Separator();
 
-  // --- Tactical Change: Consolidated and Corrected Information Section ---
   ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
   if (ImGui::CollapsingHeader("Additional Information")) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
-
     renderStringList("Saving Throws:", monster.savingThrows);
     renderStringList("Skills:", monster.skills);
     renderStringList("Damage Vulnerabilities:", monster.damageVulnerabilities);
     renderStringList("Damage Resistances:", monster.damageResistances);
     renderStringList("Damage Immunities:", monster.damageImmunities);
     renderStringList("Condition Immunities:", monster.conditionImmunities);
-
-    // Senses and Languages are now rendered correctly and only once here.
     renderStringList("Senses:", monster.senses);
     if (!monster.languages.empty()) {
       renderLabeledField("Languages:", monster.languages.c_str());
     }
-
     ImGui::PopStyleColor();
   }
   ImGui::PopStyleColor();
 
-  // Abilities Section
   if (!monster.abilities.empty()) {
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.4f, 0.6f, 1.0f));
@@ -773,38 +727,31 @@ void renderStatBlock(const Monster &monster) {
 
 void renderBestiaryUI() {
   ImGui::Begin("Bestiary");
-
   ImGui::Text("Select a monster:");
 
-  // A search bar to filter the list. If the text changes, we reset the
-  // selection.
   if (ImGui::InputText("Search", g_searchBuffer,
                        IM_ARRAYSIZE(g_searchBuffer))) {
-    g_selectedMonsterIndex = 0; // Reset selection when filter changes
+    g_selectedMonsterIndex = 0;
   }
 
-  // Filter the master list of monster names into our temporary list
   std::string filter = g_searchBuffer;
   std::transform(filter.begin(), filter.end(), filter.begin(),
                  [](unsigned char c) { return std::tolower(c); });
 
   g_filteredMonsterNames.clear();
   if (filter.empty()) {
-    // If the search is empty, show the full list
     g_filteredMonsterNames = g_monsterNames;
   } else {
     for (const auto &name : g_monsterNames) {
       std::string lower_name = name;
       std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(),
                      [](unsigned char c) { return std::tolower(c); });
-
       if (lower_name.find(filter) != std::string::npos) {
         g_filteredMonsterNames.push_back(name);
       }
     }
   }
 
-  // The ListBox now operates on our filtered list of names
   if (ImGui::ListBox(
           "##MonsterList", &g_selectedMonsterIndex,
           [](void *data, int idx) -> const char * {
@@ -812,12 +759,9 @@ void renderBestiaryUI() {
             if (idx >= 0 && idx < names->size()) {
               return (*names)[idx].c_str();
             }
-            return ""; // Should be an impossible state
+            return "";
           },
-          (void *)&g_filteredMonsterNames, g_filteredMonsterNames.size(),
-          20)) { // 20 is the number of visible items
-    // When a selection is made, fetch the monster by its name from the filtered
-    // list
+          (void *)&g_filteredMonsterNames, g_filteredMonsterNames.size(), 20)) {
     if (g_selectedMonsterIndex >= 0 &&
         g_selectedMonsterIndex < g_filteredMonsterNames.size()) {
       g_currentMonster = getMonsterByName(
@@ -825,17 +769,12 @@ void renderBestiaryUI() {
     }
   }
 
-  ImGui::Separator(); // A clean division
+  ImGui::Separator();
 
-  // The button to add the selected monster to our forces
   if (!g_filteredMonsterNames.empty() && g_selectedMonsterIndex >= 0 &&
       g_selectedMonsterIndex < g_filteredMonsterNames.size()) {
     if (ImGui::Button("Add to Encounter")) {
-      // Create a new combatant from the selected monster
       Combatant newCombatant(g_currentMonster);
-
-      // --- The Decisive Action ---
-      // Manually fetch and assign spell slots to eradicate all ambiguity.
       try {
         SQLite::Statement idQuery(
             *g_db, "SELECT MonsterID FROM Monsters WHERE Name = ?");
@@ -849,9 +788,7 @@ void renderBestiaryUI() {
         std::cerr << "Failed to get monster ID for spell slot assignment: "
                   << e.what() << std::endl;
       }
-      // --- End Decisive Action ---
 
-      // Strategically assign a unique name (e.g., Orc 1, Orc 2)
       int count = 0;
       for (const auto &combatant : g_encounterList) {
         if (combatant.base.name == newCombatant.base.name) {
@@ -878,21 +815,16 @@ void renderBestiaryUI() {
 void renderEncounterUI() {
   ImGui::Begin("Encounter");
 
-  // --- Section to Add Player Characters ---
   ImGui::SeparatorText("Party");
-
   ImGui::PushItemWidth(150);
   ImGui::InputText("Player Name", g_newPlayerNameBuffer,
                    IM_ARRAYSIZE(g_newPlayerNameBuffer));
   ImGui::PopItemWidth();
-
   ImGui::SameLine();
-
   ImGui::PushItemWidth(80);
   ImGui::InputInt("Initiative", &g_newPlayerInitiative, 0, 0,
                   ImGuiInputTextFlags_CharsDecimal);
   ImGui::PopItemWidth();
-
   ImGui::SameLine();
 
   if (ImGui::Button("Add Player")) {
@@ -901,15 +833,14 @@ void renderEncounterUI() {
       newPlayer.isPlayer = true;
       newPlayer.displayName = g_newPlayerNameBuffer;
       newPlayer.initiative = g_newPlayerInitiative;
-      newPlayer.currentHitPoints = 0; // Not tracked
-      newPlayer.maxHitPoints = 0;     // Not tracked
+      newPlayer.currentHitPoints = 0;
+      newPlayer.maxHitPoints = 0;
       g_encounterList.push_back(newPlayer);
       {
         std::stringstream ss;
         ss << newPlayer.displayName << " has joined the fray!";
         g_combatLog.push_back({ss.str(), LogEntry::INFO});
       }
-
       g_newPlayerNameBuffer[0] = '\0';
       g_newPlayerInitiative = 0;
     }
@@ -937,11 +868,8 @@ void renderEncounterUI() {
             g_currentTurnIndex < g_encounterList.size()) {
           g_encounterList[g_currentTurnIndex].hasUsedAction = false;
           g_encounterList[g_currentTurnIndex].hasUsedBonusAction = false;
-          std::cout << "BEGIN COMBAT: Resetting actions for "
-                    << g_encounterList[g_currentTurnIndex].displayName
-                    << std::endl;
         }
-        g_combatHasBegun = true; // Raise the banner!
+        g_combatHasBegun = true;
         {
           std::stringstream ss;
           ss << "It is now " << g_encounterList[g_currentTurnIndex].displayName
@@ -952,44 +880,35 @@ void renderEncounterUI() {
     } else {
       if (ImGui::Button("End Combat")) {
         g_currentTurnIndex = -1;
-        g_combatHasBegun = false; // Lower the banner
+        g_combatHasBegun = false;
         g_combatLog.push_back({"Combat has ended.", LogEntry::EVENT});
       }
     }
 
-    // "Next/Previous Turn" buttons should only be active during combat
     if (g_combatHasBegun) {
       ImGui::SameLine();
       if (ImGui::Button("Next Turn")) {
         if (g_currentTurnIndex != -1) {
-          // Decrement condition durations and remove expired conditions
           for (auto &combatant : g_encounterList) {
-            // Create a new vector to hold conditions that are still active
             std::vector<std::pair<std::string, int>> remainingConditions;
             for (const auto &condition : combatant.activeConditions) {
-              if (condition.second >
-                  1) { // If duration is more than 1, decrement
+              if (condition.second > 1) {
                 remainingConditions.push_back(
                     {condition.first, condition.second - 1});
-              } else { // Duration is 1, so it expires
+              } else {
                 std::stringstream ss;
                 ss << combatant.displayName << " is no longer "
                    << condition.first << ".";
                 g_combatLog.push_back({ss.str(), LogEntry::EVENT});
               }
             }
-            combatant.activeConditions =
-                remainingConditions; // Update active conditions
+            combatant.activeConditions = remainingConditions;
           }
 
           g_currentTurnIndex =
               (g_currentTurnIndex + 1) % g_encounterList.size();
-          // --- Reset Actions for the new turn ---
           g_encounterList[g_currentTurnIndex].hasUsedAction = false;
           g_encounterList[g_currentTurnIndex].hasUsedBonusAction = false;
-          std::cout << "NEXT TURN: Resetting actions for "
-                    << g_encounterList[g_currentTurnIndex].displayName
-                    << std::endl;
           {
             std::stringstream ss;
             ss << "It is now "
@@ -999,13 +918,11 @@ void renderEncounterUI() {
         }
       }
       ImGui::SameLine();
-      // Inside the "Previous Turn" button logic
       if (ImGui::Button("Previous Turn")) {
         if (g_currentTurnIndex != -1) {
           g_currentTurnIndex =
               (g_currentTurnIndex - 1 + g_encounterList.size()) %
               g_encounterList.size();
-          // --- Reset Actions for the new turn ---
           g_encounterList[g_currentTurnIndex].hasUsedAction = false;
           g_encounterList[g_currentTurnIndex].hasUsedBonusAction = false;
           {
@@ -1024,16 +941,12 @@ void renderEncounterUI() {
   if (g_encounterList.empty()) {
     ImGui::Text("No combatants have been added yet.");
   } else {
-    if (ImGui::BeginTable(
-            "EncounterTable", 5,
-            ImGuiTableFlags_Resizable)) { // Increased column count to 5
+    if (ImGui::BeginTable("EncounterTable", 5, ImGuiTableFlags_Resizable)) {
       ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
       ImGui::TableSetupColumn("HP", ImGuiTableColumnFlags_WidthFixed, 200.0f);
       ImGui::TableSetupColumn("Initiative", ImGuiTableColumnFlags_WidthFixed,
                               100.0f);
-      ImGui::TableSetupColumn(
-          "Conditions",
-          ImGuiTableColumnFlags_WidthStretch); // New column for conditions
+      ImGui::TableSetupColumn("Conditions", ImGuiTableColumnFlags_WidthStretch);
       ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed,
                               100.0f);
       ImGui::TableHeadersRow();
@@ -1104,7 +1017,7 @@ void renderEncounterUI() {
         ImGui::TableSetColumnIndex(2);
         ImGui::InputInt("##Initiative", &g_encounterList[i].initiative);
 
-        ImGui::TableSetColumnIndex(3); // New column for conditions
+        ImGui::TableSetColumnIndex(3);
         if (!g_encounterList[i].activeConditions.empty()) {
           for (const auto &condition : g_encounterList[i].activeConditions) {
             ImGui::TextWrapped("- %s (%d turns)", condition.first.c_str(),
@@ -1114,7 +1027,7 @@ void renderEncounterUI() {
           ImGui::Text("None");
         }
 
-        ImGui::TableSetColumnIndex(4); // Shifted from 3 to 4
+        ImGui::TableSetColumnIndex(4);
         if (ImGui::Button("Remove")) {
           combatant_to_remove = i;
         }
@@ -1155,7 +1068,6 @@ void renderCombatUI() {
   ImGui::PopStyleColor();
   ImGui::Separator();
 
-  // Display available actions for the turn
   ImGui::Text("Actions Available: ");
   ImGui::SameLine();
   if (!activeCombatant.hasUsedAction)
@@ -1217,7 +1129,6 @@ void renderCombatUI() {
       }
     }
 
-    // --- Spellcasting Section ---
     if (!activeCombatant.base.spells.empty()) {
       ImGui::SeparatorText("Spells");
       for (const auto &spell : activeCombatant.base.spells) {
@@ -1250,7 +1161,6 @@ void renderCombatUI() {
       }
     }
 
-    // --- Spell Slot Tracking ---
     bool is_spellcaster = false;
     for (const auto &slot : activeCombatant.spellSlots) {
       if (slot > 0) {
@@ -1306,10 +1216,8 @@ void renderTargetingUI() {
   int maxTargets = 1;
   if (g_targetingState.ability) {
     actionName = g_targetingState.ability->name.c_str();
-    // TODO: Add a way to specify max targets for abilities
   } else if (g_targetingState.spell) {
     actionName = g_targetingState.spell->name.c_str();
-    // TODO: Add a way to specify max targets for spells
   }
 
   ImGui::Text("Choose target(s) for %s", actionName);
@@ -1327,13 +1235,11 @@ void renderTargetingUI() {
     if (ImGui::Selectable(g_encounterList[i].displayName.c_str(),
                           is_selected)) {
       if (is_selected) {
-        // Remove from selection
         g_targetingState.selectedTargets.erase(
             std::remove(g_targetingState.selectedTargets.begin(),
                         g_targetingState.selectedTargets.end(), i),
             g_targetingState.selectedTargets.end());
       } else {
-        // Add to selection
         if (g_targetingState.selectedTargets.size() < maxTargets) {
           g_targetingState.selectedTargets.push_back(i);
         }
@@ -1387,12 +1293,10 @@ void resolveAction(TargetingState &targetingState) {
       Combatant &target = g_encounterList[target_idx];
 
       bool hit = true;
-      if (!ability.attackRollType.empty()) { // It's an attack roll ability
+      if (!ability.attackRollType.empty()) {
         int attack_roll = rollDice("1d20");
-        int attacker_ability_score = getAbilityScore(
-            activeCombatant,
-            ability.damageModifierAbility); // Assuming ability score is
-                                            // used for attack roll
+        int attacker_ability_score =
+            getAbilityScore(activeCombatant, ability.damageModifierAbility);
         int attack_modifier = calculateModifier(attacker_ability_score);
         int total_attack = attack_roll + attack_modifier;
 
@@ -1413,17 +1317,15 @@ void resolveAction(TargetingState &targetingState) {
         }
         g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
 
-      } else if (!ability.savingThrowType
-                      .empty()) { // It's a saving throw ability
+      } else if (!ability.savingThrowType.empty()) {
         if (target.isPlayer) {
-          // Prompt user for player save result
           g_playerSaveState.isActive = true;
           g_playerSaveState.targetIndex = target_idx;
           g_playerSaveState.saveType = ability.savingThrowType;
           g_playerSaveState.saveDC = ability.savingThrowDC;
           g_playerSaveState.ability = &ability;
           g_playerSaveState.spell = nullptr;
-          return; // Pause action resolution until player input
+          return;
         } else {
           int save_roll = rollDice("1d20");
           int target_ability_score =
@@ -1436,19 +1338,18 @@ void resolveAction(TargetingState &targetingState) {
                    << ability.savingThrowDC << " " << ability.savingThrowType
                    << " saving throw (Roll: " << save_roll << " + "
                    << save_modifier << " = " << total_save << ").";
-            hit = false; // Save means no full effect
+            hit = false;
           } else {
             log_ss << target.displayName << " fails on a DC "
                    << ability.savingThrowDC << " " << ability.savingThrowType
                    << " saving throw (Roll: " << save_roll << " + "
                    << save_modifier << " = " << total_save << ").";
-            hit = true; // Fail means full effect
+            hit = true;
           }
           g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
         }
       }
 
-      // Damage/Healing Application
       if (!ability.damageDice.empty()) {
         log_ss.str("");
         int damage_roll = rollDice(ability.damageDice);
@@ -1461,14 +1362,13 @@ void resolveAction(TargetingState &targetingState) {
         int total_calculated_value = damage_roll + damage_modifier;
         int final_value = total_calculated_value;
 
-        if (!hit && !ability.savingThrowType
-                         .empty()) { // Half damage on successful save
+        if (!hit && !ability.savingThrowType.empty()) {
           final_value /= 2;
           target.currentHitPoints -= final_value;
           log_ss << target.displayName << " takes " << final_value << " "
                  << ability.damageType << " damage (half on successful save).";
           g_combatLog.push_back({log_ss.str(), LogEntry::DAMAGE});
-        } else if (hit) { // Full damage on hit or failed save
+        } else if (hit) {
           if (ability.damageType == "healing") {
             target.currentHitPoints = std::min(
                 target.maxHitPoints, target.currentHitPoints + final_value);
@@ -1484,14 +1384,13 @@ void resolveAction(TargetingState &targetingState) {
         }
       }
 
-      // Condition Application (after damage/healing)
       std::regex condition_pattern(R"(\[APPLY_CONDITION:([^:]+)(?::(\d+))?\])");
       std::smatch condition_matches;
       if (std::regex_search(ability.description, condition_matches,
                             condition_pattern)) {
         log_ss.str("");
         std::string condition_name = condition_matches[1].str();
-        int duration = 1; // Default to 1 turn.
+        int duration = 1;
         if (condition_matches.size() > 2 && condition_matches[2].matched) {
           duration = std::stoi(condition_matches[2].str());
         }
@@ -1523,11 +1422,9 @@ void resolveAction(TargetingState &targetingState) {
       Combatant &target = g_encounterList[target_idx];
 
       bool hit = true;
-      if (!spell.attackRollType.empty()) { // It's an attack roll spell
+      if (!spell.attackRollType.empty()) {
         int attack_roll = rollDice("1d20");
-        int caster_ability_score =
-            getAbilityScore(activeCombatant, spell.damageModifierAbility);
-        int attack_modifier = calculateModifier(caster_ability_score);
+        int attack_modifier = activeCombatant.spellAttackBonus;
         int total_attack = attack_roll + attack_modifier;
 
         if (total_attack >= target.base.armorClass) {
@@ -1547,12 +1444,12 @@ void resolveAction(TargetingState &targetingState) {
         }
         g_combatLog.push_back({log_ss.str(), LogEntry::INFO});
 
-      } else if (!spell.savingThrowType.empty()) { // It's a saving throw spell
+      } else if (!spell.savingThrowType.empty()) {
         if (target.isPlayer) {
           g_playerSaveState.isActive = true;
           g_playerSaveState.targetIndex = target_idx;
           g_playerSaveState.saveType = spell.savingThrowType;
-          g_playerSaveState.saveDC = spell.savingThrowDC;
+          g_playerSaveState.saveDC = activeCombatant.spellSaveDC;
           g_playerSaveState.ability = nullptr;
           g_playerSaveState.spell = &spell;
           return;
@@ -1563,15 +1460,17 @@ void resolveAction(TargetingState &targetingState) {
           int save_modifier = calculateModifier(target_ability_score);
           int total_save = save_roll + save_modifier;
 
-          if (total_save >= spell.savingThrowDC) {
+          if (total_save >= activeCombatant.spellSaveDC) {
             log_ss << target.displayName << " succeeds on a DC "
-                   << spell.savingThrowDC << " " << spell.savingThrowType
+                   << activeCombatant.spellSaveDC << " "
+                   << spell.savingThrowType
                    << " saving throw (Roll: " << save_roll << " + "
                    << save_modifier << " = " << total_save << ").";
             hit = false;
           } else {
             log_ss << target.displayName << " fails on a DC "
-                   << spell.savingThrowDC << " " << spell.savingThrowType
+                   << activeCombatant.spellSaveDC << " "
+                   << spell.savingThrowType
                    << " saving throw (Roll: " << save_roll << " + "
                    << save_modifier << " = " << total_save << ").";
             hit = true;
@@ -1633,7 +1532,6 @@ void resolveAction(TargetingState &targetingState) {
   }
 }
 
-// A helper to convert strings from the database to our new enum
 ActionType stringToActionType(const std::string &str) {
   std::string lower_str = str;
   std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(),
@@ -1661,14 +1559,12 @@ std::vector<Ability> getMonsterAbilities(int monsterId, SQLite::Database &db) {
   std::vector<Ability> abilities;
   try {
     SQLite::Statement query(
-        db,
-        "SELECT A.Name, A.Description, A.AbilityType, "
-        "AU.UsageType, AU.UsesMax, AU.RechargeValue, A.ActionType, "
-        "A.TargetType, A.AttackRollType, A.SavingThrowType, A.SavingThrowDC, "
-        "A.DamageDice, A.DamageType, A.DamageModifierAbility "
-        "FROM Abilities AS A "
-        "LEFT JOIN Ability_Usage AS AU ON A.AbilityID = AU.AbilityID "
-        "WHERE A.MonsterID = ?");
+        db, "SELECT A.Name, A.Description, A.AbilityType, AU.UsageType, "
+            "AU.UsesMax, AU.RechargeValue, A.ActionType, A.TargetType, "
+            "A.AttackRollType, A.SavingThrowType, A.SavingThrowDC, "
+            "A.DamageDice, A.DamageType, A.DamageModifierAbility FROM "
+            "Abilities AS A LEFT JOIN Ability_Usage AS AU ON A.AbilityID = "
+            "AU.AbilityID WHERE A.MonsterID = ?");
     query.bind(1, monsterId);
 
     while (query.executeStep()) {

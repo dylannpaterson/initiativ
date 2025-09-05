@@ -14,27 +14,28 @@ struct Ability {
   int usesMax = 0;
   int rechargeValue = 0;
   ActionType actionType = ActionType::NONE; // The cost of using the ability
-  std::string targetType;         // New
-  std::string attackRollType;     // New
-  std::string savingThrowType;    // New
-  int savingThrowDC = 0;          // New
-  std::string damageDice;         // New
-  std::string damageType;         // New
-  std::string damageModifierAbility; // New
+  std::string targetType;                   // New
+  std::string attackRollType;               // New
+  std::string savingThrowType;              // New
+  int savingThrowDC = 0;                    // New
+  std::string damageDice;                   // New
+  std::string damageType;                   // New
+  std::string damageModifierAbility;        // New
 };
 
 struct Spell {
   std::string name;
   std::string description; // New
   int level;
-  ActionType actionType = ActionType::NONE; // Changed default to NONE, as it's explicitly set from DB
-  std::string targetType;         // New
-  std::string attackRollType;     // New
-  std::string savingThrowType;    // New
-  int savingThrowDC = 0;          // New
-  std::string damageDice;         // New
-  std::string damageType;         // New
-  std::string damageModifierAbility; // New
+  ActionType actionType = ActionType::NONE; // Changed default to NONE, as it's
+                                            // explicitly set from DB
+  std::string targetType;                   // New
+  std::string attackRollType;               // New
+  std::string savingThrowType;              // New
+  int savingThrowDC = 0;                    // New
+  std::string damageDice;                   // New
+  std::string damageType;                   // New
+  std::string damageModifierAbility;        // New
 };
 
 struct Monster {
@@ -53,6 +54,9 @@ struct Monster {
   int charisma;
   std::string challengeRating;
   std::string languages;
+
+  int spellSaveDC = 0;
+  int spellAttackBonus = 0;
 
   // Using vectors to hold the various details from join tables
   std::vector<std::string> speeds;
@@ -74,6 +78,8 @@ struct Combatant {
   int currentHitPoints = 0;
   int maxHitPoints = 0;
   bool isPlayer = false;
+  int spellSaveDC = 0;
+  int spellAttackBonus = 0;
 
   // Tracking for limited-use abilities
   std::map<std::string, int> abilityUses;
@@ -85,19 +91,21 @@ struct Combatant {
   // --- New Strategic Variables ---
   bool hasUsedAction = false;
   bool hasUsedBonusAction = false;
-  std::vector<std::pair<std::string, int>> activeConditions; // New: Track active conditions (name, duration)
+  std::vector<std::pair<std::string, int>>
+      activeConditions; // New: Track active conditions (name, duration)
   // bool hasUsedReaction = false; // For future campaigns
 
   Combatant() = default;
   explicit Combatant(const Monster &monster)
       : base(monster), displayName(monster.name),
-        currentHitPoints(monster.hitPoints), maxHitPoints(monster.hitPoints) {
+        currentHitPoints(monster.hitPoints), maxHitPoints(monster.hitPoints),
+        spellSaveDC(monster.spellSaveDC),
+        spellAttackBonus(monster.spellAttackBonus) {
     // Initialize ability uses from the base monster's abilities
     for (const auto &ability : base.abilities) {
       if (ability.usesMax > 0) {
         abilityUses[ability.name] = ability.usesMax;
       }
     }
-    
   }
 };
